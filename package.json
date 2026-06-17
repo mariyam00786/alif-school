@@ -1,0 +1,38 @@
+{
+  "name": "alif",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Alif Online Moral School monorepo scaffold",
+  "workspaces": [
+    "services/*"
+  ],
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "app:student": "cd apps/alif_student_teacher && flutter run -d chrome",
+    "app:admin": "cd apps/alif_admin && flutter run -d chrome --dart-define-from-file=env/dev.json",
+    "supabase:login": "supabase login",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "supabase:link": "supabase link",
+    "supabase:push": "supabase db push",
+    "supabase:seed": "supabase db seed",
+    "firebase:login": "firebase login",
+    "firebase:deploy": "firebase deploy",
+    "api:dev": "npm run dev --workspace=api"
+  },
+  "keywords": [
+    "flutter",
+    "supabase",
+    "firebase",
+    "ihthisab"
+  ],
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "firebase-tools": "^15.20.0",
+    "supabase": "^2.106.0"
+  }
+}

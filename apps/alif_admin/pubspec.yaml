@@ -1,0 +1,24 @@
+name: alif_admin
+description: "Alif Online Moral School Admin Panel"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alif_design_system:
+    path: ../../packages/alif_design_system
+  http: ^1.1.0
+  intl: ^0.19.0
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

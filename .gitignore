@@ -1,0 +1,30 @@
+# Node
+node_modules/
+package-lock.json
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Dart / Flutter
+.dart_tool/
+.packages
+.pub/
+build/
+
+# Supabase local files
+.supabase/
+
+# Flutter app env (contains API URL, may contain secrets)
+apps/alif_admin/env/dev.json
+apps/alif_student_teacher/env/*.json
+!apps/alif_admin/env/dev.example.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
