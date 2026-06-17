@@ -480,7 +480,9 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
                 if (_parentMode) ...[
                   const SizedBox(height: AlifSpacing.sm),
                   DropdownButtonFormField<String>(
-                    initialValue: _studentId,
+                    initialValue: _linkedStudents.any((item) => item.id == _studentId)
+                        ? _studentId
+                        : null,
                     items: _linkedStudents
                         .map(
                           (item) => DropdownMenuItem<String>(

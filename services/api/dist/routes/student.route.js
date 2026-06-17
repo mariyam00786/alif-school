@@ -287,6 +287,33 @@ router.get('/profile', async (req, res) => {
         res.status(500).json({ error: msg });
     }
 });
+router.get('/children', async (req, res) => {
+    const query = student_app_schema_1.StudentChildrenQuerySchema.parse(req.query);
+    try {
+        const { data, error } = await integrations_1.supabaseAdmin
+            .from('students')
+            .select('id, father_name, mother_name, parent_phone, batch_id, class_id, status')
+            .eq('parent_phone', query.parent_phone)
+            .order('enrollment_date', { ascending: false });
+        if (error) {
+            if ((0, dev_data_1.shouldUseLocalData)(error)) {
+                const fallback = (0, dev_data_1.listDevStudents)({
+                    limit: 500,
+                    offset: 0,
+                }).data.filter((item) => item.parent_phone === query.parent_phone);
+                res.json(fallback);
+                return;
+            }
+            res.status(400).json({ error: error.message });
+            return;
+        }
+        res.json(data || []);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to fetch linked children';
+        res.status(500).json({ error: msg });
+    }
+});
 router.put('/profile', async (req, res) => {
     const query = student_app_schema_1.StudentProfileQuerySchema.parse(req.query);
     try {

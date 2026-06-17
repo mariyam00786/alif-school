@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UpdateStudentProfileSchema = exports.StudentProfileQuerySchema = exports.StudentBadgesQuerySchema = exports.StudentProgressQuerySchema = exports.StudentLeaderboardQuerySchema = void 0;
+exports.UpdateStudentProfileSchema = exports.StudentChildrenQuerySchema = exports.StudentProfileQuerySchema = exports.StudentBadgesQuerySchema = exports.StudentProgressQuerySchema = exports.StudentLeaderboardQuerySchema = void 0;
 const zod_1 = require("zod");
 const IsoDateSchema = zod_1.z
     .string()
@@ -20,6 +20,11 @@ exports.StudentBadgesQuerySchema = zod_1.z.object({
 });
 exports.StudentProfileQuerySchema = zod_1.z.object({
     student_id: zod_1.z.string().uuid(),
+});
+exports.StudentChildrenQuerySchema = zod_1.z.object({
+    parent_phone: zod_1.z
+        .string()
+        .regex(/^\d{10,15}$/, 'Invalid parent phone format'),
 });
 exports.UpdateStudentProfileSchema = zod_1.z.object({
     address: zod_1.z.string().min(2).optional(),

@@ -92,6 +92,84 @@ function buildLocalStudentMeta(studentIds) {
         batch_id: student.batch_id ?? null,
     }));
 }
+async function buildRangeReport(fromDate, toDate, batchId) {
+    const fetchSupabaseRows = async () => {
+        const { data, error } = await integrations_1.supabaseAdmin
+            .from('activity_logs')
+            .select('student_id, marks_earned')
+            .gte('log_date', fromDate)
+            .lte('log_date', toDate);
+        if (error) {
+            throw error;
+        }
+        return (data || []);
+    };
+    const buildFromLogs = async (logs, isLocal) => {
+        const aggregated = aggregate(logs);
+        const students = isLocal
+            ? buildLocalStudentMeta(aggregated.map((row) => row.student_id))
+            : await loadStudentMeta(aggregated.map((row) => row.student_id));
+        const rows = buildReportRows(aggregated, students, batchId);
+        return {
+            summary: {
+                students: rows.length,
+                total_marks: rows.reduce((sum, row) => sum + row.total_marks, 0),
+                total_activities: rows.reduce((sum, row) => sum + row.activities_completed, 0),
+            },
+            data: rows,
+        };
+    };
+    try {
+        const logs = await fetchSupabaseRows();
+        return await buildFromLogs(logs, false);
+    }
+    catch (err) {
+        if (!(0, dev_data_1.shouldUseLocalData)(err)) {
+            throw err;
+        }
+        const localLogs = (0, dev_data_1.listDevActivityLogs)({
+            from_date: fromDate,
+            to_date: toDate,
+        }).map((item) => ({
+            student_id: item.student_id,
+            marks_earned: item.marks_earned,
+        }));
+        return await buildFromLogs(localLogs, true);
+    }
+}
+function csvEscape(value) {
+    if (value == null) {
+        return '';
+    }
+    const text = String(value);
+    if (/[",\n]/.test(text)) {
+        return '"' + text.replace(/"/g, '""') + '"';
+    }
+    return text;
+}
+function toCsv(result) {
+    const lines = [];
+    lines.push('students,total_marks,total_activities');
+    lines.push([result.summary.students, result.summary.total_marks, result.summary.total_activities]
+        .map((item) => csvEscape(item))
+        .join(','));
+    lines.push('');
+    lines.push('student_id,student_name,parent_phone,batch_id,batch_name,total_marks,activities_completed');
+    for (const row of result.data) {
+        lines.push([
+            row.student_id,
+            row.student_name,
+            row.parent_phone,
+            row.batch_id,
+            row.batch_name,
+            row.total_marks,
+            row.activities_completed,
+        ]
+            .map((item) => csvEscape(item))
+            .join(','));
+    }
+    return lines.join('\n');
+}
 router.get('/daily', async (req, res) => {
     const query = report_schema_1.DailyReportQuerySchema.parse(req.query);
     const date = query.date ?? toIsoDate(new Date());
@@ -315,6 +393,59 @@ router.get('/monthly', async (req, res) => {
             return;
         }
         const msg = err instanceof Error ? err.message : 'Failed to fetch monthly report';
+        res.status(500).json({ error: msg });
+    }
+});
+router.get('/daily/export', async (req, res) => {
+    const query = report_schema_1.DailyReportQuerySchema.parse(req.query);
+    const date = query.date ?? toIsoDate(new Date());
+    try {
+        const result = await buildRangeReport(date, date, query.batch_id);
+        const csv = toCsv(result);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="daily-report-${date}.csv"`);
+        res.status(200).send(csv);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to export daily report';
+        res.status(500).json({ error: msg });
+    }
+});
+router.get('/weekly/export', async (req, res) => {
+    const query = report_schema_1.WeeklyReportQuerySchema.parse(req.query);
+    const weekStartDate = query.week_start
+        ? mondayOfWeek(new Date(`${query.week_start}T00:00:00.000Z`))
+        : mondayOfWeek(new Date());
+    const fromDate = toIsoDate(weekStartDate);
+    const toDate = toIsoDate(addDays(weekStartDate, 6));
+    try {
+        const result = await buildRangeReport(fromDate, toDate, query.batch_id);
+        const csv = toCsv(result);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="weekly-report-${fromDate}-to-${toDate}.csv"`);
+        res.status(200).send(csv);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to export weekly report';
+        res.status(500).json({ error: msg });
+    }
+});
+router.get('/monthly/export', async (req, res) => {
+    const query = report_schema_1.MonthlyReportQuerySchema.parse(req.query);
+    const monthStartDate = query.month_start
+        ? firstDayOfMonth(new Date(`${query.month_start}T00:00:00.000Z`))
+        : firstDayOfMonth(new Date());
+    const fromDate = toIsoDate(monthStartDate);
+    const toDate = toIsoDate(lastDayOfMonth(monthStartDate));
+    try {
+        const result = await buildRangeReport(fromDate, toDate, query.batch_id);
+        const csv = toCsv(result);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="monthly-report-${fromDate}-to-${toDate}.csv"`);
+        res.status(200).send(csv);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to export monthly report';
         res.status(500).json({ error: msg });
     }
 });
