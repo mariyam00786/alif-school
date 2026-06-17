@@ -30,6 +30,11 @@ export const StudentChildrenQuerySchema = z.object({
     .regex(/^\d{10,15}$/, 'Invalid parent phone format'),
 });
 
+export const StudentApprovalHistoryQuerySchema = z.object({
+  student_id: z.string().uuid(),
+  limit: z.coerce.number().int().min(1).max(200).default(30),
+});
+
 export const UpdateStudentProfileSchema = z.object({
   address: z.string().min(2).optional(),
 });

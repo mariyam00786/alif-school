@@ -11,6 +11,7 @@ import {
 } from '../dev-data';
 import { supabaseAdmin } from '../integrations';
 import {
+  StudentApprovalHistoryQuerySchema,
   StudentBadgesQuerySchema,
   StudentChildrenQuerySchema,
   StudentLeaderboardQuerySchema,
@@ -381,6 +382,39 @@ router.get('/children', async (req, res) => {
     res.json(data || []);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch linked children';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/approval-history', async (req, res) => {
+  const query = StudentApprovalHistoryQuerySchema.parse(req.query);
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('activity_logs')
+      .select(
+        'id, student_id, activity_id, rating_id, log_date, marks_earned, parent_approved, notes, activities(id, name, name_ml), activity_ratings(id, rating_name, rating_name_ml, marks)'
+      )
+      .eq('student_id', query.student_id)
+      .order('log_date', { ascending: false })
+      .limit(query.limit);
+
+    if (error) {
+      if (shouldUseLocalData(error)) {
+        const logs = listDevActivityLogs({
+          student_id: query.student_id,
+        }).slice(0, query.limit);
+        res.json(logs);
+        return;
+      }
+
+      res.status(400).json({ error: error.message });
+      return;
+    }
+
+    res.json(data || []);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch approval history';
     res.status(500).json({ error: msg });
   }
 });

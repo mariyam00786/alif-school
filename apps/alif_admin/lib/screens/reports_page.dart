@@ -181,6 +181,104 @@ class _ReportsPageState extends State<ReportsPage> {
     }
   }
 
+  Future<void> _exportExcel() async {
+    try {
+      setState(() => _isExporting = true);
+      final excel = _reportType == 'daily'
+          ? await ReportService.exportDailyExcel(
+              date: _selectedDate,
+              batchId: _selectedBatchId,
+            )
+          : _reportType == 'weekly'
+          ? await ReportService.exportWeeklyExcel(
+              weekStart: _selectedWeekStart,
+              batchId: _selectedBatchId,
+            )
+          : await ReportService.exportMonthlyExcel(
+              monthStart: _selectedMonthStart,
+              batchId: _selectedBatchId,
+            );
+
+      if (!mounted) {
+        return;
+      }
+
+      await Clipboard.setData(ClipboardData(text: excel));
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Excel-compatible data copied to clipboard.')),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Excel export failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isExporting = false);
+      }
+    }
+  }
+
+  Future<void> _previewPrintLayout() async {
+    try {
+      final html = _reportType == 'daily'
+          ? await ReportService.getDailyPrintHtml(
+              date: _selectedDate,
+              batchId: _selectedBatchId,
+            )
+          : _reportType == 'weekly'
+          ? await ReportService.getWeeklyPrintHtml(
+              weekStart: _selectedWeekStart,
+              batchId: _selectedBatchId,
+            )
+          : await ReportService.getMonthlyPrintHtml(
+              monthStart: _selectedMonthStart,
+              batchId: _selectedBatchId,
+            );
+
+      if (!mounted) {
+        return;
+      }
+
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Print Template Preview (HTML)'),
+          content: SizedBox(
+            width: 680,
+            child: SingleChildScrollView(
+              child: Text(
+                html.length > 3500
+                    ? '${html.substring(0, 3500)}\n\n...truncated preview...'
+                    : html,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Print preview failed: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final report = _report;
@@ -272,6 +370,18 @@ class _ReportsPageState extends State<ReportsPage> {
                       onPressed: _isExporting ? null : _exportCsv,
                       icon: const Icon(Icons.download_rounded),
                       label: Text(_isExporting ? 'Exporting...' : 'Export CSV'),
+                    ),
+                    const SizedBox(width: AlifSpacing.sm),
+                    FilledButton.icon(
+                      onPressed: _isExporting ? null : _exportExcel,
+                      icon: const Icon(Icons.table_view_rounded),
+                      label: const Text('Export Excel'),
+                    ),
+                    const SizedBox(width: AlifSpacing.sm),
+                    FilledButton.tonalIcon(
+                      onPressed: _previewPrintLayout,
+                      icon: const Icon(Icons.print_rounded),
+                      label: const Text('Print Preview'),
                     ),
                   ],
                 ),

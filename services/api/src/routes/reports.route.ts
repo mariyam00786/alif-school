@@ -252,6 +252,86 @@ function toCsv(result: ReportResult) {
   return lines.join('\n');
 }
 
+function toExcelTsv(result: ReportResult) {
+  const lines: string[] = [];
+  lines.push('students\ttotal_marks\ttotal_activities');
+  lines.push(`${result.summary.students}\t${result.summary.total_marks}\t${result.summary.total_activities}`);
+  lines.push('');
+  lines.push('student_id\tstudent_name\tparent_phone\tbatch_id\tbatch_name\ttotal_marks\tactivities_completed');
+
+  for (const row of result.data) {
+    lines.push(
+      [
+        row.student_id,
+        row.student_name,
+        row.parent_phone ?? '',
+        row.batch_id ?? '',
+        row.batch_name ?? '',
+        row.total_marks,
+        row.activities_completed,
+      ]
+        .map((value) => String(value).replace(/\t/g, ' '))
+        .join('\t')
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function toPrintHtml(result: ReportResult, title: string, subtitle: string) {
+  const rows = result.data
+    .map(
+      (row) => `
+      <tr>
+        <td>${row.student_name}</td>
+        <td>${row.parent_phone ?? '-'}</td>
+        <td>${row.batch_name ?? '-'}</td>
+        <td style="text-align:right">${row.total_marks}</td>
+        <td style="text-align:right">${row.activities_completed}</td>
+      </tr>`
+    )
+    .join('');
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${title}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      .meta { margin: 0 0 16px; color: #4b5563; }
+      .summary { display: flex; gap: 12px; margin-bottom: 16px; }
+      .chip { border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #e5e7eb; padding: 8px; font-size: 13px; }
+      th { text-align: left; background: #f9fafb; }
+    </style>
+  </head>
+  <body>
+    <h1>${title}</h1>
+    <p class="meta">${subtitle}</p>
+    <div class="summary">
+      <div class="chip">Students: ${result.summary.students}</div>
+      <div class="chip">Total Marks: ${result.summary.total_marks}</div>
+      <div class="chip">Activities: ${result.summary.total_activities}</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th>Parent Phone</th>
+          <th>Batch</th>
+          <th>Total Marks</th>
+          <th>Activities</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </body>
+</html>`;
+}
+
 router.get('/daily', async (req, res) => {
   const query = DailyReportQuerySchema.parse(req.query);
   const date = query.date ?? toIsoDate(new Date());
@@ -518,6 +598,37 @@ router.get('/daily/export', async (req, res) => {
   }
 });
 
+router.get('/daily/export/excel', async (req, res) => {
+  const query = DailyReportQuerySchema.parse(req.query);
+  const date = query.date ?? toIsoDate(new Date());
+
+  try {
+    const result = await buildRangeReport(date, date, query.batch_id);
+    const tsv = toExcelTsv(result);
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="daily-report-${date}.xls"`);
+    res.status(200).send(tsv);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to export daily Excel report';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/daily/print', async (req, res) => {
+  const query = DailyReportQuerySchema.parse(req.query);
+  const date = query.date ?? toIsoDate(new Date());
+
+  try {
+    const result = await buildRangeReport(date, date, query.batch_id);
+    const html = toPrintHtml(result, 'Daily Report', `Date: ${date}`);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(html);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to render daily print report';
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/weekly/export', async (req, res) => {
   const query = WeeklyReportQuerySchema.parse(req.query);
   const weekStartDate = query.week_start
@@ -538,6 +649,45 @@ router.get('/weekly/export', async (req, res) => {
   }
 });
 
+router.get('/weekly/export/excel', async (req, res) => {
+  const query = WeeklyReportQuerySchema.parse(req.query);
+  const weekStartDate = query.week_start
+    ? mondayOfWeek(new Date(`${query.week_start}T00:00:00.000Z`))
+    : mondayOfWeek(new Date());
+  const fromDate = toIsoDate(weekStartDate);
+  const toDate = toIsoDate(addDays(weekStartDate, 6));
+
+  try {
+    const result = await buildRangeReport(fromDate, toDate, query.batch_id);
+    const tsv = toExcelTsv(result);
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="weekly-report-${fromDate}-to-${toDate}.xls"`);
+    res.status(200).send(tsv);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to export weekly Excel report';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/weekly/print', async (req, res) => {
+  const query = WeeklyReportQuerySchema.parse(req.query);
+  const weekStartDate = query.week_start
+    ? mondayOfWeek(new Date(`${query.week_start}T00:00:00.000Z`))
+    : mondayOfWeek(new Date());
+  const fromDate = toIsoDate(weekStartDate);
+  const toDate = toIsoDate(addDays(weekStartDate, 6));
+
+  try {
+    const result = await buildRangeReport(fromDate, toDate, query.batch_id);
+    const html = toPrintHtml(result, 'Weekly Report', `Week: ${fromDate} to ${toDate}`);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(html);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to render weekly print report';
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/monthly/export', async (req, res) => {
   const query = MonthlyReportQuerySchema.parse(req.query);
   const monthStartDate = query.month_start
@@ -554,6 +704,45 @@ router.get('/monthly/export', async (req, res) => {
     res.status(200).send(csv);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to export monthly report';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/monthly/export/excel', async (req, res) => {
+  const query = MonthlyReportQuerySchema.parse(req.query);
+  const monthStartDate = query.month_start
+    ? firstDayOfMonth(new Date(`${query.month_start}T00:00:00.000Z`))
+    : firstDayOfMonth(new Date());
+  const fromDate = toIsoDate(monthStartDate);
+  const toDate = toIsoDate(lastDayOfMonth(monthStartDate));
+
+  try {
+    const result = await buildRangeReport(fromDate, toDate, query.batch_id);
+    const tsv = toExcelTsv(result);
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="monthly-report-${fromDate}-to-${toDate}.xls"`);
+    res.status(200).send(tsv);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to export monthly Excel report';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/monthly/print', async (req, res) => {
+  const query = MonthlyReportQuerySchema.parse(req.query);
+  const monthStartDate = query.month_start
+    ? firstDayOfMonth(new Date(`${query.month_start}T00:00:00.000Z`))
+    : firstDayOfMonth(new Date());
+  const fromDate = toIsoDate(monthStartDate);
+  const toDate = toIsoDate(lastDayOfMonth(monthStartDate));
+
+  try {
+    const result = await buildRangeReport(fromDate, toDate, query.batch_id);
+    const html = toPrintHtml(result, 'Monthly Report', `Month: ${fromDate} to ${toDate}`);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(html);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to render monthly print report';
     res.status(500).json({ error: msg });
   }
 });

@@ -165,6 +165,17 @@ class StudentTeacherHomePage extends StatelessWidget {
                             icon: const Icon(Icons.school_rounded),
                             label: const Text('Teacher Dashboard'),
                           ),
+                          FilledButton.tonalIcon(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const ParentInsightsPage(),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.family_restroom_rounded),
+                            label: const Text('Parent Insights'),
+                          ),
                         ],
                       ),
                     ],
@@ -276,7 +287,7 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
   String? _studentId;
   bool _parentMode = false;
   bool _parentApproved = false;
-  String _parentPhone = '9999999999';
+  final String _parentPhone = '9999999999';
   List<LinkedStudent> _linkedStudents = const [];
   List<ActivityCategory> _categories = const [];
   List<ActivityItem> _activities = const [];
@@ -1105,6 +1116,349 @@ class _StudentProfilePageState extends State<StudentProfilePage> {
   }
 }
 
+class ParentInsightsPage extends StatefulWidget {
+  const ParentInsightsPage({super.key});
+
+  @override
+  State<ParentInsightsPage> createState() => _ParentInsightsPageState();
+}
+
+class _ParentInsightsPageState extends State<ParentInsightsPage> {
+  bool _isLoading = true;
+  String? _error;
+  final String _parentPhone = '9999999999';
+  List<LinkedStudent> _children = const [];
+  String? _selectedStudentId;
+  List<TeacherRemarkItem> _remarks = const [];
+  List<ApprovalHistoryItem> _approvalHistory = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+
+      final children = await ApiService.getLinkedStudents(parentPhone: _parentPhone);
+      final selected = _selectedStudentId ?? (children.isNotEmpty ? children.first.id : null);
+      final remarks = selected == null
+          ? const <TeacherRemarkItem>[]
+          : await ApiService.getTeacherRemarks(studentId: selected);
+      final history = selected == null
+          ? const <ApprovalHistoryItem>[]
+          : await ApiService.getStudentApprovalHistory(studentId: selected);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _children = children;
+        _selectedStudentId = selected;
+        _remarks = remarks;
+        _approvalHistory = history;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Parent Insights')),
+      body: ListView(
+        padding: const EdgeInsets.all(AlifSpacing.md),
+        children: [
+          AlifCard(
+            child: Column(
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _children.any((child) => child.id == _selectedStudentId)
+                      ? _selectedStudentId
+                      : null,
+                  items: _children
+                      .map(
+                        (child) => DropdownMenuItem<String>(
+                          value: child.id,
+                          child: Text(child.displayName),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: (value) async {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() => _selectedStudentId = value);
+                    await _load();
+                  },
+                  decoration: const InputDecoration(labelText: 'Child'),
+                ),
+                const SizedBox(height: AlifSpacing.sm),
+                FilledButton.tonalIcon(
+                  onPressed: _load,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Refresh'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AlifSpacing.md),
+          if (_isLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (_error != null)
+            Text('Error: $_error', style: const TextStyle(color: Colors.red))
+          else ...[
+            AlifCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Teacher Remarks',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: AlifSpacing.sm),
+                  if (_remarks.isEmpty)
+                    const Text('No teacher remarks yet.')
+                  else
+                    ..._remarks.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
+                        child: Text(
+                          '• ${item.remark} (${item.teacherName ?? 'Teacher'})',
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AlifSpacing.md),
+            AlifCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Parent Approval History',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: AlifSpacing.sm),
+                  if (_approvalHistory.isEmpty)
+                    const Text('No approval logs yet.')
+                  else
+                    ..._approvalHistory.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '${item.logDate} • ${item.activityName}',
+                              ),
+                            ),
+                            Text(
+                              item.parentApproved ? 'Approved' : 'Pending',
+                              style: TextStyle(
+                                color: item.parentApproved
+                                    ? AlifColors.success
+                                    : AlifColors.warning,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class TeacherRemarkComposerPage extends StatefulWidget {
+  const TeacherRemarkComposerPage({
+    super.key,
+    required this.student,
+  });
+
+  final TeacherStudentItem student;
+
+  @override
+  State<TeacherRemarkComposerPage> createState() => _TeacherRemarkComposerPageState();
+}
+
+class _TeacherRemarkComposerPageState extends State<TeacherRemarkComposerPage> {
+  bool _isLoading = true;
+  bool _isSubmitting = false;
+  String? _error;
+  String? _teacherId;
+  List<TeacherRemarkItem> _remarks = const [];
+  final TextEditingController _remarkController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _remarkController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+
+      final teacherId = _teacherId ?? await ApiService.getFirstTeacherId();
+      final remarks = await ApiService.getTeacherRemarks(studentId: widget.student.id);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _teacherId = teacherId;
+        _remarks = remarks;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _submit() async {
+    final teacherId = _teacherId;
+    final text = _remarkController.text.trim();
+    if (teacherId == null || text.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid remark first.')),
+      );
+      return;
+    }
+
+    try {
+      setState(() => _isSubmitting = true);
+      await ApiService.createTeacherRemark(
+        teacherId: teacherId,
+        studentId: widget.student.id,
+        remark: text,
+      );
+      _remarkController.clear();
+      await _load();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Remark saved.')));
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save remark: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Teacher Remark')),
+      body: ListView(
+        padding: const EdgeInsets.all(AlifSpacing.md),
+        children: [
+          AlifCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.student.displayName,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Text(widget.student.parentPhone),
+                const SizedBox(height: AlifSpacing.md),
+                TextField(
+                  controller: _remarkController,
+                  minLines: 2,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: 'Remark',
+                    hintText: 'Add observation, advice, or follow-up note',
+                  ),
+                ),
+                const SizedBox(height: AlifSpacing.md),
+                AlifButton(
+                  label: _isSubmitting ? 'Saving...' : 'Save Remark',
+                  isLoading: _isSubmitting,
+                  onPressed: _isSubmitting ? null : _submit,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AlifSpacing.md),
+          if (_isLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (_error != null)
+            Text('Error: $_error', style: const TextStyle(color: Colors.red))
+          else if (_remarks.isEmpty)
+            const AlifCard(child: Text('No remarks yet for this student.'))
+          else
+            ..._remarks.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
+                child: AlifCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.remark),
+                      const SizedBox(height: AlifSpacing.xs),
+                      Text(
+                        '${item.teacherName ?? 'Teacher'} • ${item.createdAt}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class TeacherDashboardPage extends StatefulWidget {
   const TeacherDashboardPage({super.key});
 
@@ -1246,6 +1600,17 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
                             ],
                           ),
                         ),
+                        IconButton(
+                          tooltip: 'Add remark',
+                          icon: const Icon(Icons.rate_review_rounded),
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => TeacherRemarkComposerPage(student: student),
+                              ),
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),
@@ -1300,6 +1665,26 @@ class ApiService {
     }
 
     return (list.first as Map<String, dynamic>)['id'] as String;
+  }
+
+  static Future<String> getFirstTeacherId() async {
+    final response = await http.get(
+      AppConfig.apiUri(
+        '/teachers',
+        queryParameters: {'status': 'active'},
+      ),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load teachers: ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body) as List<dynamic>;
+    if (decoded.isEmpty) {
+      throw Exception('No active teachers available');
+    }
+
+    return (decoded.first as Map<String, dynamic>)['id'] as String;
   }
 
   static Future<List<ActivityCategory>> listCategories() async {
@@ -1557,6 +1942,77 @@ class ApiService {
     return TeacherBatchAnalytics.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
+  }
+
+  static Future<List<TeacherRemarkItem>> getTeacherRemarks({
+    required String studentId,
+    int limit = 25,
+  }) async {
+    final response = await http.get(
+      AppConfig.apiUri(
+        '/remarks',
+        queryParameters: {
+          'student_id': studentId,
+          'limit': '$limit',
+        },
+      ),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load remarks: ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body) as List<dynamic>;
+    return decoded
+        .map((item) => TeacherRemarkItem.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  static Future<void> createTeacherRemark({
+    required String teacherId,
+    required String studentId,
+    required String remark,
+  }) async {
+    final response = await http.post(
+      AppConfig.apiUri('/remarks'),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-alif-role': 'teacher',
+      },
+      body: jsonEncode({
+        'teacher_id': teacherId,
+        'student_id': studentId,
+        'remark': remark,
+      }),
+    );
+
+    if (response.statusCode != 201) {
+      throw Exception('Failed to create remark: ${response.body}');
+    }
+  }
+
+  static Future<List<ApprovalHistoryItem>> getStudentApprovalHistory({
+    required String studentId,
+    int limit = 30,
+  }) async {
+    final response = await http.get(
+      AppConfig.apiUri(
+        '/student/approval-history',
+        queryParameters: {
+          'student_id': studentId,
+          'limit': '$limit',
+        },
+      ),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load approval history: ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body) as List<dynamic>;
+    return decoded
+        .map((item) => ApprovalHistoryItem.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
   }
 }
 
@@ -1828,6 +2284,56 @@ class TeacherStudentItem {
       fatherName: json['father_name'] as String? ?? '-',
       motherName: json['mother_name'] as String? ?? '-',
       parentPhone: json['parent_phone'] as String? ?? '-',
+    );
+  }
+}
+
+class TeacherRemarkItem {
+  const TeacherRemarkItem({
+    required this.id,
+    required this.remark,
+    required this.createdAt,
+    this.teacherName,
+  });
+
+  final String id;
+  final String remark;
+  final String createdAt;
+  final String? teacherName;
+
+  factory TeacherRemarkItem.fromJson(Map<String, dynamic> json) {
+    return TeacherRemarkItem(
+      id: json['id'] as String? ?? '',
+      remark: json['remark'] as String? ?? '-',
+      createdAt: json['created_at'] as String? ?? '-',
+      teacherName: json['teacher_name'] as String?,
+    );
+  }
+}
+
+class ApprovalHistoryItem {
+  const ApprovalHistoryItem({
+    required this.id,
+    required this.logDate,
+    required this.parentApproved,
+    required this.activityName,
+    required this.marksEarned,
+  });
+
+  final String id;
+  final String logDate;
+  final bool parentApproved;
+  final String activityName;
+  final int marksEarned;
+
+  factory ApprovalHistoryItem.fromJson(Map<String, dynamic> json) {
+    final activity = json['activities'] as Map<String, dynamic>? ?? const {};
+    return ApprovalHistoryItem(
+      id: json['id'] as String? ?? '',
+      logDate: json['log_date'] as String? ?? '-',
+      parentApproved: json['parent_approved'] as bool? ?? false,
+      activityName: activity['name'] as String? ?? '-',
+      marksEarned: (json['marks_earned'] as num? ?? 0).toInt(),
     );
   }
 }
