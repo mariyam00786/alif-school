@@ -76,6 +76,10 @@ class _DailyMarkingPageState extends State<DailyMarkingPage> {
         );
       }
 
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
         _students = studentsResponse.data;
         _activities = activities;
@@ -90,7 +94,9 @@ class _DailyMarkingPageState extends State<DailyMarkingPage> {
         await _loadExistingLogs();
       }
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) {
+        setState(() => _error = e.toString());
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -108,6 +114,10 @@ class _DailyMarkingPageState extends State<DailyMarkingPage> {
       studentId: studentId,
       logDate: _logDate,
     );
+
+    if (!mounted) {
+      return;
+    }
 
     final selected = <String, String?>{};
     final quantities = <String, String>{};
@@ -140,7 +150,7 @@ class _DailyMarkingPageState extends State<DailyMarkingPage> {
       lastDate: DateTime(2100),
     );
 
-    if (picked == null) {
+    if (!mounted || picked == null) {
       return;
     }
 

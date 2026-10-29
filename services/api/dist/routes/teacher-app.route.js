@@ -13,26 +13,27 @@ router.get('/batches', async (_req, res) => {
         if (error) {
             if ((0, dev_data_1.shouldUseLocalData)(error)) {
                 const teachers = (0, dev_data_1.listDevTeachers)({});
-                const rows = teachers.map((teacher) => ({
-                    teacher_id: teacher.id,
-                    teacher_name: teacher.full_name,
+                res.json(teachers.map((teacher) => ({
+                    id: teacher.id,
+                    full_name: teacher.full_name,
+                    mobile_number: teacher.mobile_number,
+                    email: teacher.email ?? '',
+                    student_count: 0,
                     batches: teacher.teacher_batches.map((item) => item.batches),
-                }));
-                res.json(rows);
+                })));
                 return;
             }
             res.status(400).json({ error: error.message });
             return;
         }
-        const map = new Map();
+        const byTeacher = new Map();
         for (const row of data || []) {
-            const current = map.get(row.teacher_id) ??
-                ({ teacher_id: row.teacher_id, batches: [] });
-            const resolvedBatches = Array.isArray(row.batches) ? row.batches : [row.batches];
-            current.batches.push(...resolvedBatches.filter((item) => item != null));
-            map.set(row.teacher_id, current);
+            const current = byTeacher.get(row.teacher_id) ?? { id: row.teacher_id, batches: [] };
+            const batches = Array.isArray(row.batches) ? row.batches : [row.batches];
+            current.batches.push(...batches.filter((item) => item != null));
+            byTeacher.set(row.teacher_id, current);
         }
-        res.json(Array.from(map.values()));
+        res.json(Array.from(byTeacher.values()));
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to fetch teacher batches';
@@ -52,12 +53,11 @@ router.get('/students', async (req, res) => {
         const { data, error } = await request;
         if (error) {
             if ((0, dev_data_1.shouldUseLocalData)(error)) {
-                const rows = (0, dev_data_1.listDevStudents)({
+                res.json((0, dev_data_1.listDevStudents)({
                     limit: 500,
                     offset: 0,
                     batch_id: query.batch_id,
-                }).data;
-                res.json(rows);
+                }).data);
                 return;
             }
             res.status(400).json({ error: error.message });
@@ -120,36 +120,50 @@ router.get('/batch/:id/analytics', async (req, res) => {
     try {
         const { data: students, error: studentsError } = await integrations_1.supabaseAdmin
             .from('students')
-            .select('id, father_name, mother_name, batch_id, class_id')
+            .select('id, father_name, mother_name')
             .eq('batch_id', req.params.id);
         if (studentsError) {
             if ((0, dev_data_1.shouldUseLocalData)(studentsError)) {
-                const rows = (0, dev_data_1.listDevStudents)({
+                const studentRows = (0, dev_data_1.listDevStudents)({
                     limit: 500,
                     offset: 0,
                     batch_id: req.params.id,
                 }).data;
-                const studentIds = rows.map((item) => item.id);
+                const studentIds = studentRows.map((item) => item.id);
                 const logs = (0, dev_data_1.listDevActivityLogs)({
                     from_date: query.from_date,
                     to_date: query.to_date,
                 }).filter((item) => studentIds.includes(item.student_id));
                 const totalMarks = logs.reduce((sum, item) => sum + item.marks_earned, 0);
+                const topPerformerMap = new Map();
+                for (const log of logs) {
+                    const student = studentRows.find((item) => item.id === log.student_id);
+                    const name = student?.father_name ?? 'Unknown';
+                    topPerformerMap.set(name, (topPerformerMap.get(name) ?? 0) + log.marks_earned);
+                }
+                const topPerformers = Array.from(topPerformerMap.entries())
+                    .sort((left, right) => right[1] - left[1])
+                    .slice(0, 3)
+                    .map((entry) => entry[0]);
+                const completionRate = studentRows.length === 0
+                    ? 0
+                    : Math.round((100 * logs.length) / studentRows.length);
                 res.json({
-                    batch: (0, dev_data_1.getDevBatch)(req.params.id),
-                    summary: {
-                        students: rows.length,
-                        total_marks: totalMarks,
-                        total_activities: logs.length,
-                        completion_rate: rows.length === 0 ? 0 : Number((logs.length / rows.length).toFixed(2)),
-                    },
+                    batch_id: req.params.id,
+                    batch_name: (0, dev_data_1.getDevBatch)(req.params.id)?.name ?? 'Unknown',
+                    total_students: studentRows.length,
+                    completion_rate: completionRate,
+                    average_marks: studentRows.length === 0 ? 0 : Math.round(totalMarks / studentRows.length),
+                    top_performers: topPerformers,
+                    areas_for_improvement: completionRate < 50 ? 'Increase daily engagement' : null,
                 });
                 return;
             }
             res.status(400).json({ error: studentsError.message });
             return;
         }
-        const studentIds = (students || []).map((item) => item.id);
+        const studentRows = students || [];
+        const studentIds = studentRows.map((item) => item.id);
         let logsRequest = integrations_1.supabaseAdmin
             .from('activity_logs')
             .select('student_id, marks_earned, log_date')
@@ -165,16 +179,27 @@ router.get('/batch/:id/analytics', async (req, res) => {
             throw logsError;
         }
         const totalMarks = (logs || []).reduce((sum, item) => sum + Number(item.marks_earned ?? 0), 0);
+        const topPerformerMap = new Map();
+        for (const log of logs || []) {
+            const student = studentRows.find((item) => item.id === log.student_id);
+            const name = student?.father_name ?? 'Unknown';
+            topPerformerMap.set(name, (topPerformerMap.get(name) ?? 0) + Number(log.marks_earned ?? 0));
+        }
+        const topPerformers = Array.from(topPerformerMap.entries())
+            .sort((left, right) => right[1] - left[1])
+            .slice(0, 3)
+            .map((entry) => entry[0]);
+        const completionRate = studentRows.length === 0
+            ? 0
+            : Math.round((100 * (logs || []).length) / studentRows.length);
         res.json({
-            batch: (0, dev_data_1.getDevBatch)(req.params.id),
-            summary: {
-                students: studentIds.length,
-                total_marks: totalMarks,
-                total_activities: (logs || []).length,
-                completion_rate: studentIds.length === 0
-                    ? 0
-                    : Number((((logs || []).length / studentIds.length) || 0).toFixed(2)),
-            },
+            batch_id: req.params.id,
+            batch_name: (0, dev_data_1.getDevBatch)(req.params.id)?.name ?? 'Unknown',
+            total_students: studentRows.length,
+            completion_rate: completionRate,
+            average_marks: studentRows.length === 0 ? 0 : Math.round(totalMarks / studentRows.length),
+            top_performers: topPerformers,
+            areas_for_improvement: completionRate < 50 ? 'Increase daily engagement' : null,
         });
     }
     catch (err) {

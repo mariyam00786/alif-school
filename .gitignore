@@ -28,3 +28,7 @@ apps/alif_student_teacher/env/*.json
 # OS
 .DS_Store
 Thumbs.db
+.tmp*
+apps/alif_web/dist/
+apps/alif_web/node_modules/
+

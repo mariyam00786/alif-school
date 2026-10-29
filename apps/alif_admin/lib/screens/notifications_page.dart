@@ -17,8 +17,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   List<NotificationItem> _notifications = [];
   String _targetType = 'all';
+  String? _targetId;
   bool _schedule = false;
   DateTime? _scheduledAt;
+  bool _isRecurring = false;
+  String _recurringType = 'once'; // once, daily, weekly, monthly
   bool _isLoading = true;
   bool _isSubmitting = false;
   String? _error;
@@ -67,7 +70,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       firstDate: DateTime.now(),
       lastDate: DateTime(2100),
     );
-    if (date == null) {
+    if (!mounted || date == null) {
       return;
     }
 
@@ -75,7 +78,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       context: context,
       initialTime: TimeOfDay.now(),
     );
-    if (time == null) {
+    if (!mounted || time == null) {
       return;
     }
 
@@ -99,6 +102,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return;
     }
 
+    if ((_schedule || _isRecurring) && _scheduledAt == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick date and time for scheduled delivery')),
+      );
+      return;
+    }
+
     try {
       setState(() => _isSubmitting = true);
 
@@ -108,14 +118,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
             ? null
             : _bodyController.text.trim(),
         targetType: _targetType,
-        scheduledAt: _schedule ? _scheduledAt : null,
+        targetId: _targetId,
+        scheduledAt: _schedule || _isRecurring ? _scheduledAt : null,
+        frequency: _isRecurring ? _recurringType : null,
       );
 
       _titleController.clear();
       _bodyController.clear();
       setState(() {
         _targetType = 'all';
+        _targetId = null;
         _schedule = false;
+        _isRecurring = false;
+        _recurringType = 'once';
         _scheduledAt = null;
       });
 
@@ -186,26 +201,64 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   ],
                   onChanged: (value) {
                     if (value != null) {
-                      setState(() => _targetType = value);
+                      setState(() {
+                        _targetType = value;
+                        _targetId = null;
+                      });
                     }
                   },
                   decoration: const InputDecoration(labelText: 'Target Type'),
                 ),
-                const SizedBox(height: AlifSpacing.sm),
+                if (_targetType != 'all') ...[
+                  const SizedBox(height: AlifSpacing.sm),
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: 'Target ID (UUID)',
+                      hintText: 'Leave empty to target all ${_targetType}s',
+                    ),
+                    onChanged: (value) => setState(() => _targetId = value.isEmpty ? null : value),
+                  ),
+                ],
+                const SizedBox(height: AlifSpacing.md),
+                SwitchListTile(
+                  value: _isRecurring,
+                  onChanged: (value) => setState(() => _isRecurring = value),
+                  title: const Text('Recurring notification'),
+                  subtitle: const Text('Send repeatedly on a schedule'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                if (_isRecurring) ...[
+                  const SizedBox(height: AlifSpacing.sm),
+                  DropdownButtonFormField<String>(
+                    initialValue: _recurringType,
+                    items: const [
+                      DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                      DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                      DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _recurringType = value);
+                      }
+                    },
+                    decoration: const InputDecoration(labelText: 'Repeat'),
+                  ),
+                ],
+                const SizedBox(height: AlifSpacing.md),
                 SwitchListTile(
                   value: _schedule,
                   onChanged: (value) => setState(() => _schedule = value),
                   title: const Text('Schedule this notification'),
                   contentPadding: EdgeInsets.zero,
                 ),
-                if (_schedule) ...[
+                if (_schedule || _isRecurring) ...[
                   const SizedBox(height: AlifSpacing.sm),
                   Row(
                     children: [
                       Expanded(
                         child: Text(
                           _scheduledAt == null
-                              ? 'No schedule selected'
+                              ? 'Pick date & time'
                               : 'Scheduled: ${_scheduledAt!.toLocal()}',
                         ),
                       ),
@@ -221,7 +274,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   children: [
                     Expanded(
                       child: AlifButton(
-                        label: 'Send / Schedule',
+                        label: _isRecurring
+                            ? 'Create Recurring'
+                            : (_schedule ? 'Schedule' : 'Send Now'),
                         isLoading: _isSubmitting,
                         onPressed: _isSubmitting ? null : _submit,
                       ),

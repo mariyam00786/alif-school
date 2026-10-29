@@ -6,6 +6,9 @@ require("dotenv/config");
 exports.config = {
     port: Number(process.env.PORT ?? 4000),
     enforceDevAuth: String(process.env.ENFORCE_DEV_AUTH ?? 'false').toLowerCase() === 'true',
+    allowLocalDataFallback: String(process.env.ALLOW_LOCAL_DATA_FALLBACK ?? 'false').toLowerCase() === 'true',
+    forceLiveDb: String(process.env.FORCE_LIVE_DB ?? (process.env.NODE_ENV === 'production' ? 'true' : 'false')).toLowerCase() === 'true',
+    requireSupabaseOnBoot: String(process.env.REQUIRE_SUPABASE_ON_BOOT ?? 'true').toLowerCase() === 'true',
     supabaseUrl: process.env.SUPABASE_URL ?? '',
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
     firebaseProjectId: process.env.FIREBASE_PROJECT_ID ?? '',

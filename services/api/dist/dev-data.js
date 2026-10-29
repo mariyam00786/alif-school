@@ -41,6 +41,12 @@ exports.deleteDevActivityLog = deleteDevActivityLog;
 exports.listDevTeacherRemarks = listDevTeacherRemarks;
 exports.createDevTeacherRemark = createDevTeacherRemark;
 exports.getDevAuthUserByPhone = getDevAuthUserByPhone;
+exports.getDevAuthUserById = getDevAuthUserById;
+exports.upsertDevDeviceToken = upsertDevDeviceToken;
+exports.deleteDevDeviceToken = deleteDevDeviceToken;
+exports.listDevDeviceTokens = listDevDeviceTokens;
+exports.getDevStudentProfilePhoto = getDevStudentProfilePhoto;
+exports.setDevStudentProfilePhoto = setDevStudentProfilePhoto;
 exports.listDevBadges = listDevBadges;
 exports.createDevBadge = createDevBadge;
 exports.updateDevBadge = updateDevBadge;
@@ -51,6 +57,8 @@ exports.updateDevNotification = updateDevNotification;
 exports.deleteDevNotification = deleteDevNotification;
 exports.listDevStudentBadges = listDevStudentBadges;
 const crypto_1 = require("crypto");
+const config_1 = require("./config");
+const devStudentProfilePhotos = new Map();
 const batches = [
     {
         id: '11111111-1111-4111-8111-111111111111',
@@ -92,6 +100,7 @@ const classes = [
 const students = [
     {
         id: '55555555-5555-4555-8555-555555555555',
+        profile_id: '10000000-0000-4000-8000-000000000003',
         parent_phone: '9999999999',
         father_name: 'Abdullah',
         mother_name: 'Amina',
@@ -263,6 +272,7 @@ const badges = [
     },
 ];
 const notifications = [];
+const deviceTokens = [];
 const studentBadges = [
     {
         id: (0, crypto_1.randomUUID)(),
@@ -378,6 +388,12 @@ function decorateActivityLog(log) {
     };
 }
 function shouldUseLocalData(error) {
+    if (config_1.config.forceLiveDb) {
+        return false;
+    }
+    if (!config_1.config.allowLocalDataFallback) {
+        return false;
+    }
     const message = error instanceof Error
         ? error.message
         : typeof error === 'object' && error !== null && 'message' in error
@@ -891,6 +907,48 @@ function createDevTeacherRemark(input) {
 }
 function getDevAuthUserByPhone(phone) {
     return authUsers.find((item) => item.phone === phone) ?? null;
+}
+function getDevAuthUserById(id) {
+    return authUsers.find((item) => item.id === id) ?? null;
+}
+function upsertDevDeviceToken(input) {
+    const index = deviceTokens.findIndex((item) => item.device_token === input.device_token);
+    if (index === -1) {
+        deviceTokens.unshift(input);
+        return input;
+    }
+    deviceTokens[index] = {
+        ...deviceTokens[index],
+        ...input,
+    };
+    return deviceTokens[index];
+}
+function deleteDevDeviceToken(profileId, token) {
+    const index = deviceTokens.findIndex((item) => item.profile_id === profileId && item.device_token === token);
+    if (index === -1) {
+        return false;
+    }
+    deviceTokens.splice(index, 1);
+    return true;
+}
+function listDevDeviceTokens(params) {
+    const profileIds = params.profile_ids ?? [];
+    return deviceTokens.filter((item) => {
+        if (params.notifications_enabled != null && item.notifications_enabled !== params.notifications_enabled) {
+            return false;
+        }
+        if (profileIds.length > 0 && !profileIds.includes(item.profile_id)) {
+            return false;
+        }
+        return true;
+    });
+}
+function getDevStudentProfilePhoto(studentId) {
+    return devStudentProfilePhotos.get(studentId) ?? null;
+}
+function setDevStudentProfilePhoto(studentId, photoUrl) {
+    devStudentProfilePhotos.set(studentId, photoUrl);
+    return photoUrl;
 }
 function listDevBadges(status) {
     return badges

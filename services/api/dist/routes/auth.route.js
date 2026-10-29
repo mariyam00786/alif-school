@@ -1,11 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const config_1 = require("../config");
 const dev_data_1 = require("../dev-data");
+const integrations_1 = require("../integrations");
 const auth_schema_1 = require("../schemas/auth.schema");
+const auth_context_1 = require("../utils/auth-context");
 const router = (0, express_1.Router)();
 const DEV_OTP = '123456';
+const isDevAuthEnabled = !config_1.config.forceLiveDb;
 router.post('/send-otp', (req, res) => {
+    if (!isDevAuthEnabled) {
+        res.status(403).json({ error: 'Dev OTP auth is disabled in live mode' });
+        return;
+    }
     try {
         const body = auth_schema_1.SendOtpSchema.parse(req.body);
         const user = (0, dev_data_1.getDevAuthUserByPhone)(body.phone);
@@ -22,6 +30,10 @@ router.post('/send-otp', (req, res) => {
     }
 });
 router.post('/verify-otp', (req, res) => {
+    if (!isDevAuthEnabled) {
+        res.status(403).json({ error: 'Dev OTP auth is disabled in live mode' });
+        return;
+    }
     try {
         const body = auth_schema_1.VerifyOtpSchema.parse(req.body);
         if (body.otp !== DEV_OTP) {
@@ -45,22 +57,52 @@ router.post('/verify-otp', (req, res) => {
     }
 });
 router.get('/me', (req, res) => {
-    const authHeader = String(req.header('authorization') ?? '').trim();
-    if (!authHeader.toLowerCase().startsWith('bearer dev-')) {
+    const token = (0, auth_context_1.tokenFromAuthorizationHeader)(req.header('authorization'));
+    if (!token) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
     }
-    const token = authHeader.substring('Bearer '.length);
-    const id = token.replace(/^dev-/, '');
-    const candidates = ['9999999999', '8888888888', '9999999998', '9999999997'];
-    const user = candidates
-        .map((phone) => (0, dev_data_1.getDevAuthUserByPhone)(phone))
-        .find((item) => item?.id === id);
-    if (!user) {
-        res.status(401).json({ error: 'Unauthorized' });
+    if (token.startsWith('dev-')) {
+        if (!isDevAuthEnabled) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const user = (0, dev_data_1.getDevAuthUserById)(token.replace(/^dev-/, ''));
+        if (!user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        res.json({ user });
         return;
     }
-    res.json({ user });
+    integrations_1.supabaseAdmin.auth
+        .getUser(token)
+        .then(async ({ data, error }) => {
+        if (error || !data.user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const { data: profile, error: profileError } = await integrations_1.supabaseAdmin
+            .from('profiles')
+            .select('id, phone, full_name, role')
+            .eq('id', data.user.id)
+            .maybeSingle();
+        if (profileError || !profile) {
+            res.status(401).json({ error: 'Profile not found for authenticated user' });
+            return;
+        }
+        res.json({
+            user: {
+                id: profile.id,
+                phone: profile.phone,
+                full_name: profile.full_name,
+                role: profile.role,
+            },
+        });
+    })
+        .catch(() => {
+        res.status(401).json({ error: 'Unauthorized' });
+    });
 });
 router.post('/logout', (_req, res) => {
     res.json({ ok: true });

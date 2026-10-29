@@ -1,12 +1,25 @@
 import { Router } from 'express';
 
-import { getDevAuthUserByPhone } from '../dev-data';
+import { config } from '../config';
+import { getDevAuthUserById, getDevAuthUserByPhone } from '../dev-data';
+import { supabaseAdmin } from '../integrations';
 import { SendOtpSchema, VerifyOtpSchema } from '../schemas/auth.schema';
+import { tokenFromAuthorizationHeader } from '../utils/auth-context';
 
 const router = Router();
 const DEV_OTP = '123456';
+// Disable dev auth in production or when explicitly forcing live DB
+const isDevAuthEnabled = !config.forceLiveDb && process.env.NODE_ENV !== 'production';
 
 router.post('/send-otp', (req, res) => {
+  if (!isDevAuthEnabled) {
+    res.status(403).json({ 
+      error: 'OTP authentication is disabled in production mode',
+      hint: 'Use real Supabase auth credentials'
+    });
+    return;
+  }
+
   try {
     const body = SendOtpSchema.parse(req.body);
     const user = getDevAuthUserByPhone(body.phone);
@@ -24,6 +37,14 @@ router.post('/send-otp', (req, res) => {
 });
 
 router.post('/verify-otp', (req, res) => {
+  if (!isDevAuthEnabled) {
+    res.status(403).json({ 
+      error: 'OTP authentication is disabled in production mode',
+      hint: 'Use real Supabase auth credentials'
+    });
+    return;
+  }
+
   try {
     const body = VerifyOtpSchema.parse(req.body);
     if (body.otp !== DEV_OTP) {
@@ -49,25 +70,62 @@ router.post('/verify-otp', (req, res) => {
 });
 
 router.get('/me', (req, res) => {
-  const authHeader = String(req.header('authorization') ?? '').trim();
-  if (!authHeader.toLowerCase().startsWith('bearer dev-')) {
+  const token = tokenFromAuthorizationHeader(req.header('authorization'));
+  if (!token) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
 
-  const token = authHeader.substring('Bearer '.length);
-  const id = token.replace(/^dev-/, '');
-  const candidates = ['9999999999', '8888888888', '9999999998', '9999999997'];
-  const user = candidates
-    .map((phone) => getDevAuthUserByPhone(phone))
-    .find((item) => item?.id === id);
+  if (token.startsWith('dev-')) {
+    if (!isDevAuthEnabled) {
+      res.status(401).json({ 
+        error: 'Dev auth tokens are not accepted in production mode',
+        hint: 'Use Supabase auth tokens'
+      });
+      return;
+    }
 
-  if (!user) {
-    res.status(401).json({ error: 'Unauthorized' });
+    const user = getDevAuthUserById(token.replace(/^dev-/, ''));
+    if (!user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    res.json({ user });
     return;
   }
 
-  res.json({ user });
+  supabaseAdmin.auth
+    .getUser(token)
+    .then(async ({ data, error }) => {
+      if (error || !data.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .select('id, phone, full_name, role')
+        .eq('id', data.user.id)
+        .maybeSingle();
+
+      if (profileError || !profile) {
+        res.status(401).json({ error: 'Profile not found for authenticated user' });
+        return;
+      }
+
+      res.json({
+        user: {
+          id: profile.id,
+          phone: profile.phone,
+          full_name: profile.full_name,
+          role: profile.role,
+        },
+      });
+    })
+    .catch(() => {
+      res.status(401).json({ error: 'Unauthorized' });
+    });
 });
 
 router.post('/logout', (_req, res) => {

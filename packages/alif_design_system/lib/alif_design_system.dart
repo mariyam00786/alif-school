@@ -8,4 +8,5 @@ export 'src/components/alif_text_input.dart';
 export 'src/theme/alif_theme.dart';
 export 'src/tokens/alif_colors.dart';
 export 'src/tokens/alif_spacing.dart';
+export 'src/tokens/alif_text_styles.dart';
 export 'src/tokens/alif_typography.dart';

@@ -218,6 +218,88 @@ class _BadgesPageState extends State<BadgesPage> {
     }
   }
 
+  Future<void> _showRulesDialog(BadgeItem badge) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Award Rules for ${badge.name}'),
+        content: SizedBox(
+          width: 500,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Badge award rules can be created to automatically grant this badge when students meet certain criteria.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: AlifSpacing.md),
+                const Text(
+                  'Supported Rule Types:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: Text(
+                    '• activity_count: Award when student completes N activities\n'
+                    '• total_marks: Award when student earns N total marks\n'
+                    '• activity_streak: Award for completing activities N days in a row\n'
+                    '• first_completion: Award on first completion of a specific activity',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: AlifSpacing.md),
+                Text(
+                  'API Endpoint: POST /api/badges/${badge.id}/rules',
+                  style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                ),
+                const SizedBox(height: AlifSpacing.md),
+                const Text(
+                  'Example Request:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '{\n'
+                    '  "rule_type": "activity_count",\n'
+                    '  "rule_config": {\n'
+                    '    "threshold": 10\n'
+                    '  },\n'
+                    '  "is_active": true\n'
+                    '}',
+                    style: TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Use API directly or admin dashboard to manage rules'),
+                ),
+              );
+            },
+            child: const Text('Learn More'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlifAppShell(
@@ -311,6 +393,11 @@ class _BadgesPageState extends State<BadgesPage> {
                       IconButton(
                         onPressed: () => _showBadgeDialog(badge),
                         icon: const Icon(Icons.edit),
+                      ),
+                      IconButton(
+                        onPressed: () => _showRulesDialog(badge),
+                        icon: const Icon(Icons.rule_outlined),
+                        tooltip: 'Manage Award Rules',
                       ),
                       IconButton(
                         onPressed: () => _deleteBadge(badge),

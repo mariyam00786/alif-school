@@ -23,10 +23,11 @@ const badges_route_1 = __importDefault(require("./routes/badges.route"));
 const notifications_route_1 = __importDefault(require("./routes/notifications.route"));
 const student_route_1 = __importDefault(require("./routes/student.route"));
 const teacher_app_route_1 = __importDefault(require("./routes/teacher-app.route"));
+const device_tokens_route_1 = __importDefault(require("./routes/device-tokens.route"));
 const auth_guard_1 = require("./middleware/auth-guard");
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
-app.use(express_1.default.json());
+app.use(express_1.default.json({ limit: '10mb' }));
 app.use((0, auth_guard_1.createAuthGuard)(config_1.config.enforceDevAuth));
 app.use('/api/auth', auth_route_1.default);
 app.use('/api/students', students_route_1.default);
@@ -42,6 +43,7 @@ app.use('/api/reports', reports_route_1.default);
 app.use('/api/remarks', remarks_route_1.default);
 app.use('/api/badges', badges_route_1.default);
 app.use('/api/notifications', notifications_route_1.default);
+app.use('/api/device-tokens', device_tokens_route_1.default);
 app.use('/api/student', student_route_1.default);
 app.use('/api/teacher', teacher_app_route_1.default);
 app.get('/health', async (_req, res) => {
@@ -73,16 +75,28 @@ app.post('/notifications/test', async (req, res) => {
     });
     res.json({ ok: true });
 });
-function bootstrap() {
-    try {
-        (0, config_1.assertEnv)();
-        app.listen(config_1.config.port, () => {
-            console.log(`API listening on http://localhost:${config_1.config.port}`);
-            console.log(`Health check: http://localhost:${config_1.config.port}/health`);
-        });
-    }
-    catch (err) {
-        console.error('Failed to start API:', err);
+async function verifySupabaseConnectivity() {
+    const { error } = await integrations_1.supabaseAdmin.from('activity_categories').select('id').limit(1);
+    if (error) {
+        throw new Error(`Supabase connectivity check failed: ${error.message}`);
     }
 }
-bootstrap();
+async function bootstrap() {
+    (0, config_1.assertEnv)();
+    if (config_1.config.requireSupabaseOnBoot) {
+        await verifySupabaseConnectivity();
+    }
+    app.listen(config_1.config.port, () => {
+        console.log(`API listening on http://localhost:${config_1.config.port}`);
+        console.log(`Health check: http://localhost:${config_1.config.port}/health`);
+        console.log(`Local data fallback: ${config_1.config.allowLocalDataFallback ? 'enabled' : 'disabled'}`);
+        console.log(`Force live DB mode: ${config_1.config.forceLiveDb ? 'enabled' : 'disabled'}`);
+        console.log(`Require Supabase on boot: ${config_1.config.requireSupabaseOnBoot ? 'enabled' : 'disabled'}`);
+    });
+}
+bootstrap().catch((err) => {
+    console.error('Failed to start API:', err);
+    if (!config_1.config.allowLocalDataFallback) {
+        console.error('Hint: set ALLOW_LOCAL_DATA_FALLBACK=true for temporary local fallback in non-production environments.');
+    }
+});

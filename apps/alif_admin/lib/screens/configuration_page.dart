@@ -85,9 +85,9 @@ class _ConfigurationPageState extends State<ConfigurationPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting category: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting category: $e')));
       }
     }
   }
@@ -227,7 +227,10 @@ class _CategoryListViewState extends State<CategoryListView> {
   @override
   Widget build(BuildContext context) {
     final categories = widget.controller.data;
-    final activeCount = categories.where((category) => category.status == 'active').length;
+    final activeCount = categories
+        .where((category) => category.status == 'active')
+        .length;
+    final compact = MediaQuery.sizeOf(context).width < 560;
 
     return ListView(
       padding: const EdgeInsets.all(AlifSpacing.md),
@@ -252,7 +255,9 @@ class _CategoryListViewState extends State<CategoryListView> {
             },
             decoration: InputDecoration(
               labelText: 'Category Status',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ),
@@ -273,7 +278,11 @@ class _CategoryListViewState extends State<CategoryListView> {
           AlifCard(
             child: Column(
               children: [
-                const Icon(Icons.error_outline, color: AlifColors.danger, size: 30),
+                const Icon(
+                  Icons.error_outline,
+                  color: AlifColors.danger,
+                  size: 30,
+                ),
                 const SizedBox(height: AlifSpacing.sm),
                 Text(
                   widget.controller.error!,
@@ -292,28 +301,43 @@ class _CategoryListViewState extends State<CategoryListView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(category.name, style: Theme.of(context).textTheme.titleLarge),
+                              Text(
+                                category.name,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
                               if ((category.nameMl ?? '').isNotEmpty)
                                 Text(
                                   category.nameMl!,
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: AlifColors.textSecondary,
-                                      ),
+                                  style: AlifTextStyles.malayalamBody(),
                                 ),
+                              if (compact) ...[
+                                const SizedBox(height: AlifSpacing.sm),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: AlifBadge(
+                                    label: category.status.toUpperCase(),
+                                    background: category.status == 'active'
+                                        ? AlifColors.primary
+                                        : AlifColors.neutral,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                        AlifBadge(
-                          label: category.status.toUpperCase(),
-                          background: category.status == 'active'
-                              ? AlifColors.primary
-                              : AlifColors.neutral,
-                        ),
+                        if (!compact)
+                          AlifBadge(
+                            label: category.status.toUpperCase(),
+                            background: category.status == 'active'
+                                ? AlifColors.primary
+                                : AlifColors.neutral,
+                          ),
                       ],
                     ),
                     const SizedBox(height: AlifSpacing.sm),
@@ -350,9 +374,14 @@ class _CategoryListViewState extends State<CategoryListView> {
                           child: const Text('Edit'),
                         ),
                         FilledButton.tonal(
-                          style: FilledButton.styleFrom(backgroundColor: Colors.red.shade100),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.red.shade100,
+                          ),
                           onPressed: () => widget.onDelete(category),
-                          child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                          child: const Text(
+                            'Delete',
+                            style: TextStyle(color: Colors.red),
+                          ),
                         ),
                       ],
                     ),
@@ -428,9 +457,9 @@ class _ConfigSummaryPill extends StatelessWidget {
       child: Text(
         '$label: $value',
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -479,7 +508,8 @@ class ActivityManagementSection extends StatefulWidget {
   final ValueChanged<ActivityCategory> onSelectCategory;
 
   @override
-  State<ActivityManagementSection> createState() => _ActivityManagementSectionState();
+  State<ActivityManagementSection> createState() =>
+      _ActivityManagementSectionState();
 }
 
 class _ActivityManagementSectionState extends State<ActivityManagementSection> {
@@ -522,9 +552,9 @@ class _ActivityManagementSectionState extends State<ActivityManagementSection> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting activity: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting activity: $e')));
       }
     }
   }
@@ -532,7 +562,9 @@ class _ActivityManagementSectionState extends State<ActivityManagementSection> {
   @override
   void initState() {
     super.initState();
-    _controller = ActivityListController(selectedCategoryId: widget.selectedCategory?.id);
+    _controller = ActivityListController(
+      selectedCategoryId: widget.selectedCategory?.id,
+    );
     _controller.addListener(_onChanged);
   }
 
@@ -560,6 +592,8 @@ class _ActivityManagementSectionState extends State<ActivityManagementSection> {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 560;
+
     return AlifCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -573,16 +607,25 @@ class _ActivityManagementSectionState extends State<ActivityManagementSection> {
           DropdownButtonFormField<String>(
             initialValue: widget.selectedCategory?.id,
             items: widget.categories
-                .map((c) => DropdownMenuItem<String>(value: c.id, child: Text(c.name)))
+                .map(
+                  (c) => DropdownMenuItem<String>(
+                    value: c.id,
+                    child: Text(c.name),
+                  ),
+                )
                 .toList(),
             onChanged: (value) {
               if (value != null) {
-                widget.onSelectCategory(widget.categories.firstWhere((c) => c.id == value));
+                widget.onSelectCategory(
+                  widget.categories.firstWhere((c) => c.id == value),
+                );
               }
             },
             decoration: InputDecoration(
               labelText: 'Category',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
           const SizedBox(height: AlifSpacing.md),
@@ -604,46 +647,103 @@ class _ActivityManagementSectionState extends State<ActivityManagementSection> {
           if (_controller.isLoading)
             const Center(child: CircularProgressIndicator())
           else if (_controller.error != null)
-            Text('Error: ${_controller.error}', style: const TextStyle(color: Colors.red))
+            Text(
+              'Error: ${_controller.error}',
+              style: const TextStyle(color: Colors.red),
+            )
           else
             ..._controller.data.map(
               (activity) => Padding(
                 padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
                 child: AlifCard(
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(activity.name)),
-                      FilledButton.tonal(
-                        onPressed: () => setState(() => _selectedActivity = activity),
-                        child: Text(
-                          _selectedActivity?.id == activity.id ? 'Selected' : 'Manage Ratings',
-                        ),
-                      ),
-                      const SizedBox(width: AlifSpacing.sm),
-                      FilledButton.tonal(
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (context) => ActivityFormDialog(
-                              category: widget.selectedCategory!,
-                              initialActivity: activity,
-                              onSuccess: _controller.refresh,
+                  child: compact
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(activity.name),
+                            const SizedBox(height: AlifSpacing.sm),
+                            Wrap(
+                              spacing: AlifSpacing.sm,
+                              runSpacing: AlifSpacing.sm,
+                              children: [
+                                FilledButton.tonal(
+                                  onPressed: () =>
+                                      setState(() => _selectedActivity = activity),
+                                  child: Text(
+                                    _selectedActivity?.id == activity.id
+                                        ? 'Selected'
+                                        : 'Manage Ratings',
+                                  ),
+                                ),
+                                FilledButton.tonal(
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (context) => ActivityFormDialog(
+                                        category: widget.selectedCategory!,
+                                        initialActivity: activity,
+                                        onSuccess: _controller.refresh,
+                                      ),
+                                    );
+                                  },
+                                  child: const Text('Edit'),
+                                ),
+                                FilledButton.tonal(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.red.shade100,
+                                  ),
+                                  onPressed: () => _deleteActivity(activity),
+                                  child: const Text(
+                                    'Delete',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                        child: const Text('Edit'),
-                      ),
-                      const SizedBox(width: AlifSpacing.sm),
-                      FilledButton.tonal(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.red.shade100),
-                        onPressed: () => _deleteActivity(activity),
-                        child: const Text('Delete', style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(child: Text(activity.name)),
+                            FilledButton.tonal(
+                              onPressed: () =>
+                                  setState(() => _selectedActivity = activity),
+                              child: Text(
+                                _selectedActivity?.id == activity.id
+                                    ? 'Selected'
+                                    : 'Manage Ratings',
+                              ),
+                            ),
+                            const SizedBox(width: AlifSpacing.sm),
+                            FilledButton.tonal(
+                              onPressed: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => ActivityFormDialog(
+                                    category: widget.selectedCategory!,
+                                    initialActivity: activity,
+                                    onSuccess: _controller.refresh,
+                                  ),
+                                );
+                              },
+                              child: const Text('Edit'),
+                            ),
+                            const SizedBox(width: AlifSpacing.sm),
+                            FilledButton.tonal(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.red.shade100,
+                              ),
+                              onPressed: () => _deleteActivity(activity),
+                              child: const Text(
+                                'Delete',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
                   ),
                 ),
               ),
-            ),
           const SizedBox(height: AlifSpacing.md),
           RatingManagementSection(selectedActivity: _selectedActivity),
         ],
@@ -685,7 +785,10 @@ class ActivityListController extends ChangeNotifier {
       isLoading = true;
       error = null;
       _safeNotify();
-      data = await ActivityService.listActivities(categoryId: selectedCategoryId, status: 'active');
+      data = await ActivityService.listActivities(
+        categoryId: selectedCategoryId,
+        status: 'active',
+      );
     } catch (e) {
       error = e.toString();
     } finally {
@@ -708,7 +811,8 @@ class RatingManagementSection extends StatefulWidget {
   final ActivityItem? selectedActivity;
 
   @override
-  State<RatingManagementSection> createState() => _RatingManagementSectionState();
+  State<RatingManagementSection> createState() =>
+      _RatingManagementSectionState();
 }
 
 class _RatingManagementSectionState extends State<RatingManagementSection> {
@@ -749,9 +853,9 @@ class _RatingManagementSectionState extends State<RatingManagementSection> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting rating: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting rating: $e')));
       }
     }
   }
@@ -787,45 +891,81 @@ class _RatingManagementSectionState extends State<RatingManagementSection> {
         _error = null;
       });
       final list = await RatingService.listRatings(activityId: id);
+      if (!mounted) {
+        return;
+      }
       setState(() => _data = list);
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) {
+        setState(() => _error = e.toString());
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 560;
+
     return AlifCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  widget.selectedActivity == null
-                      ? 'Select an activity above to manage ratings.'
-                      : 'Ratings for ${widget.selectedActivity!.name}',
-                ),
-              ),
-              if (widget.selectedActivity != null)
-                AlifButton(
-                  label: '+ Add Rating',
-                  expand: false,
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => RatingFormDialog(
-                        activity: widget.selectedActivity!,
-                        onSuccess: _load,
+          compact
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.selectedActivity == null
+                          ? 'Select an activity above to manage ratings.'
+                          : 'Ratings for ${widget.selectedActivity!.name}',
+                    ),
+                    if (widget.selectedActivity != null) ...[
+                      const SizedBox(height: AlifSpacing.sm),
+                      AlifButton(
+                        label: '+ Add Rating',
+                        expand: false,
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => RatingFormDialog(
+                              activity: widget.selectedActivity!,
+                              onSuccess: _load,
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ],
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.selectedActivity == null
+                            ? 'Select an activity above to manage ratings.'
+                            : 'Ratings for ${widget.selectedActivity!.name}',
+                      ),
+                    ),
+                    if (widget.selectedActivity != null)
+                      AlifButton(
+                        label: '+ Add Rating',
+                        expand: false,
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => RatingFormDialog(
+                              activity: widget.selectedActivity!,
+                              onSuccess: _load,
+                            ),
+                          );
+                        },
+                      ),
+                  ],
                 ),
-            ],
-          ),
           const SizedBox(height: AlifSpacing.md),
           if (_isLoading)
             const Center(child: CircularProgressIndicator())
@@ -838,33 +978,77 @@ class _RatingManagementSectionState extends State<RatingManagementSection> {
               (rating) => Padding(
                 padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
                 child: AlifCard(
-                  child: Row(
-                    children: [
-                      Expanded(child: Text('${rating.ratingName} (${rating.marks})')),
-                      FilledButton.tonal(
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (context) => RatingFormDialog(
-                              activity: widget.selectedActivity!,
-                              initialRating: rating,
-                              onSuccess: _load,
+                  child: compact
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${rating.ratingName} (${rating.marks})'),
+                            const SizedBox(height: AlifSpacing.sm),
+                            Wrap(
+                              spacing: AlifSpacing.sm,
+                              runSpacing: AlifSpacing.sm,
+                              children: [
+                                FilledButton.tonal(
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (context) => RatingFormDialog(
+                                        activity: widget.selectedActivity!,
+                                        initialRating: rating,
+                                        onSuccess: _load,
+                                      ),
+                                    );
+                                  },
+                                  child: const Text('Edit'),
+                                ),
+                                FilledButton.tonal(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.red.shade100,
+                                  ),
+                                  onPressed: () => _deleteRating(rating),
+                                  child: const Text(
+                                    'Delete',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                        child: const Text('Edit'),
-                      ),
-                      const SizedBox(width: AlifSpacing.sm),
-                      FilledButton.tonal(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.red.shade100),
-                        onPressed: () => _deleteRating(rating),
-                        child: const Text('Delete', style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: Text('${rating.ratingName} (${rating.marks})'),
+                            ),
+                            FilledButton.tonal(
+                              onPressed: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => RatingFormDialog(
+                                    activity: widget.selectedActivity!,
+                                    initialRating: rating,
+                                    onSuccess: _load,
+                                  ),
+                                );
+                              },
+                              child: const Text('Edit'),
+                            ),
+                            const SizedBox(width: AlifSpacing.sm),
+                            FilledButton.tonal(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.red.shade100,
+                              ),
+                              onPressed: () => _deleteRating(rating),
+                              child: const Text(
+                                'Delete',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
                   ),
                 ),
               ),
-            ),
         ],
       ),
     );
@@ -887,9 +1071,15 @@ class CategoryFormDialog extends StatefulWidget {
 
 class _CategoryFormDialogState extends State<CategoryFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.initialCategory?.name ?? '');
-  late final _nameMl = TextEditingController(text: widget.initialCategory?.nameMl ?? '');
-  late final _icon = TextEditingController(text: widget.initialCategory?.icon ?? '');
+  late final _name = TextEditingController(
+    text: widget.initialCategory?.name ?? '',
+  );
+  late final _nameMl = TextEditingController(
+    text: widget.initialCategory?.nameMl ?? '',
+  );
+  late final _icon = TextEditingController(
+    text: widget.initialCategory?.icon ?? '',
+  );
   late final _displayOrder = TextEditingController(
     text: widget.initialCategory?.displayOrder.toString() ?? '0',
   );
@@ -945,9 +1135,9 @@ class _CategoryFormDialogState extends State<CategoryFormDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -959,7 +1149,9 @@ class _CategoryFormDialogState extends State<CategoryFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.initialCategory == null ? 'Add Category' : 'Edit Category'),
+      title: Text(
+        widget.initialCategory == null ? 'Add Category' : 'Edit Category',
+      ),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -969,12 +1161,15 @@ class _CategoryFormDialogState extends State<CategoryFormDialog> {
               TextFormField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Name'),
-                validator: (value) => (value == null || value.trim().isEmpty) ? 'Required' : null,
+                validator: (value) =>
+                    (value == null || value.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
                 controller: _nameMl,
-                decoration: const InputDecoration(labelText: 'Name (Malayalam)'),
+                decoration: const InputDecoration(
+                  labelText: 'Name (Malayalam)',
+                ),
               ),
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
@@ -1049,8 +1244,12 @@ class ActivityFormDialog extends StatefulWidget {
 
 class _ActivityFormDialogState extends State<ActivityFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.initialActivity?.name ?? '');
-  late final _nameMl = TextEditingController(text: widget.initialActivity?.nameMl ?? '');
+  late final _name = TextEditingController(
+    text: widget.initialActivity?.name ?? '',
+  );
+  late final _nameMl = TextEditingController(
+    text: widget.initialActivity?.nameMl ?? '',
+  );
   late final _displayOrder = TextEditingController(
     text: widget.initialActivity?.displayOrder.toString() ?? '0',
   );
@@ -1108,9 +1307,9 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -1122,7 +1321,9 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.initialActivity == null ? 'Add Activity' : 'Edit Activity'),
+      title: Text(
+        widget.initialActivity == null ? 'Add Activity' : 'Edit Activity',
+      ),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -1132,12 +1333,15 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
               TextFormField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Name'),
-                validator: (value) => (value == null || value.trim().isEmpty) ? 'Required' : null,
+                validator: (value) =>
+                    (value == null || value.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
                 controller: _nameMl,
-                decoration: const InputDecoration(labelText: 'Name (Malayalam)'),
+                decoration: const InputDecoration(
+                  labelText: 'Name (Malayalam)',
+                ),
               ),
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
@@ -1214,10 +1418,18 @@ class RatingFormDialog extends StatefulWidget {
 
 class _RatingFormDialogState extends State<RatingFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.initialRating?.ratingName ?? '');
-  late final _nameMl = TextEditingController(text: widget.initialRating?.ratingNameMl ?? '');
-  late final _marks = TextEditingController(text: widget.initialRating?.marks.toString() ?? '0');
-  late final _color = TextEditingController(text: widget.initialRating?.color ?? '#3FA34D');
+  late final _name = TextEditingController(
+    text: widget.initialRating?.ratingName ?? '',
+  );
+  late final _nameMl = TextEditingController(
+    text: widget.initialRating?.ratingNameMl ?? '',
+  );
+  late final _marks = TextEditingController(
+    text: widget.initialRating?.marks.toString() ?? '0',
+  );
+  late final _color = TextEditingController(
+    text: widget.initialRating?.color ?? '#3FA34D',
+  );
   late final _displayOrder = TextEditingController(
     text: widget.initialRating?.displayOrder.toString() ?? '0',
   );
@@ -1247,7 +1459,9 @@ class _RatingFormDialogState extends State<RatingFormDialog> {
         await RatingService.createRating(
           activityId: widget.activity.id,
           ratingName: _name.text.trim(),
-          ratingNameMl: _nameMl.text.trim().isEmpty ? null : _nameMl.text.trim(),
+          ratingNameMl: _nameMl.text.trim().isEmpty
+              ? null
+              : _nameMl.text.trim(),
           marks: marks,
           color: _color.text.trim().isEmpty ? '#3FA34D' : _color.text.trim(),
           displayOrder: order,
@@ -1256,7 +1470,9 @@ class _RatingFormDialogState extends State<RatingFormDialog> {
         await RatingService.updateRating(
           widget.initialRating!.id,
           ratingName: _name.text.trim(),
-          ratingNameMl: _nameMl.text.trim().isEmpty ? null : _nameMl.text.trim(),
+          ratingNameMl: _nameMl.text.trim().isEmpty
+              ? null
+              : _nameMl.text.trim(),
           marks: marks,
           color: _color.text.trim().isEmpty ? '#3FA34D' : _color.text.trim(),
           displayOrder: order,
@@ -1269,9 +1485,9 @@ class _RatingFormDialogState extends State<RatingFormDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -1293,12 +1509,15 @@ class _RatingFormDialogState extends State<RatingFormDialog> {
               TextFormField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Name'),
-                validator: (value) => (value == null || value.trim().isEmpty) ? 'Required' : null,
+                validator: (value) =>
+                    (value == null || value.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
                 controller: _nameMl,
-                decoration: const InputDecoration(labelText: 'Name (Malayalam)'),
+                decoration: const InputDecoration(
+                  labelText: 'Name (Malayalam)',
+                ),
               ),
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
@@ -1319,13 +1538,17 @@ class _RatingFormDialogState extends State<RatingFormDialog> {
               const SizedBox(height: AlifSpacing.md),
               TextFormField(
                 controller: _color,
-                decoration: const InputDecoration(labelText: 'Color (hex, e.g. #3FA34D)'),
+                decoration: const InputDecoration(
+                  labelText: 'Color (hex, e.g. #3FA34D)',
+                ),
                 validator: (value) {
                   final input = (value ?? '').trim();
                   if (input.isEmpty) {
                     return 'Required';
                   }
-                  final colorRegex = RegExp(r'^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$');
+                  final colorRegex = RegExp(
+                    r'^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$',
+                  );
                   if (!colorRegex.hasMatch(input)) {
                     return 'Use valid hex color';
                   }

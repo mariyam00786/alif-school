@@ -38,3 +38,10 @@ export const StudentApprovalHistoryQuerySchema = z.object({
 export const UpdateStudentProfileSchema = z.object({
   address: z.string().min(2).optional(),
 });
+
+export const UploadStudentProfilePhotoSchema = z.object({
+  student_id: z.string().uuid(),
+  file_name: z.string().min(1).max(200),
+  content_type: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  data_base64: z.string().min(20),
+});

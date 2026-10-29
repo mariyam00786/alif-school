@@ -50,6 +50,9 @@ class _StudentListViewState extends State<StudentListView> {
   Future<void> _loadBatches() async {
     try {
       final batches = await StudentService.getBatches();
+      if (!mounted) {
+        return;
+      }
       setState(() => _batches = batches);
     } catch (e) {
       if (mounted) {
@@ -424,30 +427,64 @@ class _StudentPaginationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 560;
+
     return Padding(
       padding: const EdgeInsets.all(AlifSpacing.md),
-      child: Row(
-        children: [
-          Text(
-            "Showing page ${pagination.currentPage} of ${pagination.pages}",
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AlifColors.textSecondary,
+      child: compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  "Showing page ${pagination.currentPage} of ${pagination.pages}",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AlifColors.textSecondary,
+                      ),
                 ),
-          ),
-          const Spacer(),
-          FilledButton.tonalIcon(
-            onPressed: onPrev,
-            icon: const Icon(Icons.chevron_left),
-            label: const Text("Prev"),
-          ),
-          const SizedBox(width: AlifSpacing.sm),
-          FilledButton.icon(
-            onPressed: onNext,
-            icon: const Icon(Icons.chevron_right),
-            label: const Text("Next"),
-          ),
-        ],
-      ),
+                const SizedBox(height: AlifSpacing.sm),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: onPrev,
+                        icon: const Icon(Icons.chevron_left),
+                        label: const Text("Prev"),
+                      ),
+                    ),
+                    const SizedBox(width: AlifSpacing.sm),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: onNext,
+                        icon: const Icon(Icons.chevron_right),
+                        label: const Text("Next"),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                Text(
+                  "Showing page ${pagination.currentPage} of ${pagination.pages}",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AlifColors.textSecondary,
+                      ),
+                ),
+                const Spacer(),
+                FilledButton.tonalIcon(
+                  onPressed: onPrev,
+                  icon: const Icon(Icons.chevron_left),
+                  label: const Text("Prev"),
+                ),
+                const SizedBox(width: AlifSpacing.sm),
+                FilledButton.icon(
+                  onPressed: onNext,
+                  icon: const Icon(Icons.chevron_right),
+                  label: const Text("Next"),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -466,6 +503,7 @@ class StudentListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 560;
     final dob = DateFormat("MMM dd, yyyy").format(student.dateOfBirth);
     final enrolled = DateFormat("MMM dd, yyyy").format(student.enrollmentDate);
     final title = (student.fullName ?? "").trim().isNotEmpty
@@ -517,16 +555,30 @@ class StudentListTile extends StatelessWidget {
                             color: AlifColors.textSecondary,
                           ),
                     ),
+                    if (compact) ...[
+                      const SizedBox(height: AlifSpacing.sm),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: AlifBadge(
+                          label: student.status.toUpperCase(),
+                          background: student.status == "active"
+                              ? AlifColors.primary
+                              : AlifColors.neutral,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(width: AlifSpacing.md),
-              AlifBadge(
-                label: student.status.toUpperCase(),
-                background: student.status == "active"
-                    ? AlifColors.primary
-                    : AlifColors.neutral,
-              ),
+              if (!compact) ...[
+                const SizedBox(width: AlifSpacing.md),
+                AlifBadge(
+                  label: student.status.toUpperCase(),
+                  background: student.status == "active"
+                      ? AlifColors.primary
+                      : AlifColors.neutral,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: AlifSpacing.md),
@@ -545,9 +597,10 @@ class StudentListTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AlifSpacing.md),
-          Row(
+          Wrap(
             spacing: AlifSpacing.md,
-            mainAxisAlignment: MainAxisAlignment.end,
+            runSpacing: AlifSpacing.sm,
+            alignment: WrapAlignment.end,
             children: [
               FilledButton.tonal(
                 onPressed: onEdit,

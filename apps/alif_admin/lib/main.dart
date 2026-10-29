@@ -12,6 +12,10 @@ import "screens/remarks_page.dart";
 import "screens/student_management_page.dart";
 import "screens/teacher_management_page.dart";
 import "services/auth_service.dart";
+import "services/device_token_service.dart";
+import "services/firebase_options.dart";
+import "services/fcm_service.dart";
+import "package:firebase_core/firebase_core.dart";
 
 class _AdminDestination {
   const _AdminDestination({
@@ -27,7 +31,26 @@ class _AdminDestination {
   final Widget page;
 }
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase for FCM
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    debugPrint('[Firebase] Initialized successfully');
+    
+    // Initialize FCM service
+    try {
+      await FcmService.initialize();
+    } catch (e) {
+      debugPrint('FCM initialization error (continuing anyway): $e');
+    }
+  } catch (e) {
+    debugPrint('[Firebase] Initialization error (continuing anyway): $e');
+  }
+  
   runApp(const AdminApp());
 }
 
@@ -54,12 +77,58 @@ class AdminAuthGate extends StatefulWidget {
 
 class _AdminAuthGateState extends State<AdminAuthGate> {
   AuthSession? _session;
+  bool _tokenRefreshListenerAttached = false;
+
+  Future<void> _registerFcmForSession(AuthSession session) async {
+    final token = FcmService.getToken() ?? await FcmService.refreshToken();
+    if (token == null || token.isEmpty) {
+      return;
+    }
+
+    try {
+      await DeviceTokenService.registerToken(
+        accessToken: session.accessToken,
+        token: token,
+        role: session.user.role,
+      );
+    } catch (error) {
+      debugPrint('FCM token registration failed: $error');
+    }
+
+    if (_tokenRefreshListenerAttached) {
+      return;
+    }
+
+    FcmService.onTokenRefresh((newToken) {
+      DeviceTokenService.registerToken(
+        accessToken: session.accessToken,
+        token: newToken,
+        role: session.user.role,
+      ).catchError((error) {
+        debugPrint('FCM token refresh registration failed: $error');
+      });
+    });
+    _tokenRefreshListenerAttached = true;
+  }
 
   void _onLoggedIn(AuthSession session) {
     setState(() => _session = session);
+    _registerFcmForSession(session);
   }
 
   void _logout() {
+    final session = _session;
+    final token = FcmService.getToken();
+    if (session != null && token != null && token.isNotEmpty) {
+      DeviceTokenService.unregisterToken(
+        accessToken: session.accessToken,
+        token: token,
+      ).catchError((error) {
+        debugPrint('FCM token unregister failed: $error');
+      });
+    }
+
+    AuthService.clearToken();
     setState(() => _session = null);
   }
 
@@ -335,16 +404,37 @@ class _AdminHomePageState extends State<AdminHomePage> {
   Widget build(BuildContext context) {
     final destinations = _destinations;
     final active = destinations[_selectedIndex];
-    final isDesktop = MediaQuery.sizeOf(context).width >= 960;
+    final width = MediaQuery.sizeOf(context).width;
+    final isDesktop = width >= 960;
+    final isMobile = width < 600;
+
+    EdgeInsets bodyPadding;
+    if (isDesktop) {
+      bodyPadding = const EdgeInsets.all(AlifSpacing.lg);
+    } else if (isMobile) {
+      bodyPadding = EdgeInsets.zero;
+    } else {
+      bodyPadding = const EdgeInsets.all(AlifSpacing.sm);
+    }
 
     return Scaffold(
       backgroundColor: AlifColors.bg,
+      drawer: !isDesktop
+          ? _MobileNavDrawer(
+              destinations: destinations,
+              selectedIndex: _selectedIndex,
+              onSelected: (index) {
+                setState(() => _selectedIndex = index);
+                Navigator.of(context).pop();
+              },
+            )
+          : null,
       body: Stack(
         children: [
           const _AtmosphereBackground(),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(AlifSpacing.lg),
+              padding: bodyPadding,
               child: isDesktop
                   ? Row(
                       children: [
@@ -376,22 +466,84 @@ class _AdminHomePageState extends State<AdminHomePage> {
           ),
         ],
       ),
-      bottomNavigationBar: isDesktop
-          ? null
-          : NavigationBar(
-              selectedIndex: _selectedIndex,
-              onDestinationSelected: (index) {
-                setState(() => _selectedIndex = index);
-              },
-              destinations: destinations
-                  .map(
-                    (item) => NavigationDestination(
-                      icon: Icon(item.icon),
-                      label: item.label,
-                    ),
-                  )
-                  .toList(),
+    );
+  }
+}
+
+class _MobileNavDrawer extends StatelessWidget {
+  const _MobileNavDrawer({
+    required this.destinations,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<_AdminDestination> destinations;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AlifSpacing.lg,
+                AlifSpacing.lg,
+                AlifSpacing.lg,
+                AlifSpacing.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'ALIF Admin',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: AlifSpacing.xs),
+                  Text(
+                    'School operations cockpit',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AlifColors.textSecondary,
+                        ),
+                  ),
+                ],
+              ),
             ),
+            const Divider(),
+            Expanded(
+              child: ListView.builder(
+                itemCount: destinations.length,
+                itemBuilder: (context, index) {
+                  final item = destinations[index];
+                  final selected = index == selectedIndex;
+                  return ListTile(
+                    leading: Icon(
+                      item.icon,
+                      color: selected ? AlifColors.primary : AlifColors.textSecondary,
+                    ),
+                    title: Text(
+                      item.label,
+                      style: TextStyle(
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+                        color: selected ? AlifColors.primary : null,
+                      ),
+                    ),
+                    selected: selected,
+                    selectedTileColor: AlifColors.primary.withValues(alpha: 0.1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onTap: () => onSelected(index),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -588,20 +740,25 @@ class _MainContentFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+    final radius = isMobile ? BorderRadius.zero : BorderRadius.circular(24);
+
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: radius,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.9),
-          border: Border.all(color: AlifColors.border),
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: const [
-            BoxShadow(
-              blurRadius: 30,
-              offset: Offset(0, 12),
-              color: Color(0x22000000),
-            ),
-          ],
+          border: isMobile ? null : Border.all(color: AlifColors.border),
+          borderRadius: radius,
+          boxShadow: isMobile
+              ? null
+              : const [
+                  BoxShadow(
+                    blurRadius: 30,
+                    offset: Offset(0, 12),
+                    color: Color(0x22000000),
+                  ),
+                ],
         ),
         child: Column(
           children: [
@@ -627,12 +784,14 @@ class _HeroBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(
-        AlifSpacing.xl,
-        AlifSpacing.lg,
-        AlifSpacing.xl,
-        AlifSpacing.lg,
+      padding: EdgeInsets.fromLTRB(
+        isMobile ? AlifSpacing.md : AlifSpacing.xl,
+        AlifSpacing.md,
+        isMobile ? AlifSpacing.sm : AlifSpacing.xl,
+        AlifSpacing.md,
       ),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -646,48 +805,64 @@ class _HeroBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(destination.icon, color: Colors.white),
-          const SizedBox(width: AlifSpacing.md),
+          if (isMobile)
+            IconButton(
+              icon: const Icon(Icons.menu_rounded, color: Colors.white),
+              tooltip: 'Menu',
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            )
+          else
+            Icon(destination.icon, color: Colors.white),
+          const SizedBox(width: AlifSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   destination.label,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  destination.subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.9),
-                      ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Logged in as ${session.user.fullName} (${session.user.role})',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.86),
-                      ),
-                ),
+                if (!isMobile) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    destination.subtitle,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Logged in as ${session.user.fullName} (${session.user.role})',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.86),
+                        ),
+                  ),
+                ],
               ],
             ),
           ),
-          FilledButton.tonalIcon(
-            onPressed: onLogout,
-            icon: const Icon(Icons.logout_rounded),
-            label: const Text('Logout'),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.white.withValues(alpha: 0.2),
-              foregroundColor: Colors.white,
-              side: BorderSide(
-                color: Colors.white.withValues(alpha: 0.35),
+          if (isMobile)
+            IconButton(
+              icon: const Icon(Icons.logout_rounded, color: Colors.white),
+              tooltip: 'Logout',
+              onPressed: onLogout,
+            )
+          else
+            FilledButton.tonalIcon(
+              onPressed: onLogout,
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('Logout'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                foregroundColor: Colors.white,
+                side: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.35),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

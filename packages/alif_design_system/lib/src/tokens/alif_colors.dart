@@ -14,6 +14,7 @@ abstract final class AlifColors {
   static const Color success = Color(0xFF2E7D32);
   static const Color warning = Color(0xFFE09A00);
   static const Color danger = Color(0xFFCC3D2D);
+  static const Color error = danger;
   static const Color neutral = Color(0xFF64727D);
 
   static const Color bg = Color(0xFFF7FBF8);

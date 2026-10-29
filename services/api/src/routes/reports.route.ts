@@ -747,4 +747,271 @@ router.get('/monthly/print', async (req, res) => {
   }
 });
 
+// Student Progress Report
+router.get('/student/:studentId', async (req, res) => {
+  const { studentId } = req.params;
+  const period = (req.query.period as string) ?? 'monthly';
+  let fromDate: string;
+  let toDate: string;
+
+  if (period === 'weekly') {
+    const weekStartDate = mondayOfWeek(new Date());
+    fromDate = toIsoDate(weekStartDate);
+    toDate = toIsoDate(addDays(weekStartDate, 6));
+  } else {
+    const monthStartDate = firstDayOfMonth(new Date());
+    fromDate = toIsoDate(monthStartDate);
+    toDate = toIsoDate(lastDayOfMonth(monthStartDate));
+  }
+
+  try {
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from('activity_logs')
+      .select('student_id, activity_id, rating_id, marks_earned, log_date, notes')
+      .eq('student_id', studentId)
+      .gte('log_date', fromDate)
+      .lte('log_date', toDate)
+      .order('log_date', { ascending: false });
+
+    if (logsError) {
+      res.status(400).json({ error: logsError.message });
+      return;
+    }
+
+    // Get student details
+    const { data: student, error: studentError } = await supabaseAdmin
+      .from('students')
+      .select('id, father_name, mother_name, parent_phone, batch_id')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    if (studentError || !student) {
+      res.status(404).json({ error: 'Student not found' });
+      return;
+    }
+
+    // Get batch name
+    const { data: batch } = await supabaseAdmin
+      .from('batches')
+      .select('name')
+      .eq('id', student.batch_id)
+      .maybeSingle();
+
+    const totalMarks = (logs || []).reduce((sum, log) => sum + (Number(log.marks_earned) || 0), 0);
+    const avgMarks = logs && logs.length > 0 ? totalMarks / logs.length : 0;
+
+    res.json({
+      student: {
+        id: student.id,
+        name: [student.father_name, student.mother_name].filter(Boolean).join(' / '),
+        batch_name: batch?.name,
+        parent_phone: student.parent_phone,
+      },
+      period: { type: period, from_date: fromDate, to_date: toDate },
+      summary: {
+        total_activities: logs?.length || 0,
+        total_marks: totalMarks,
+        average_marks: Math.round(avgMarks * 100) / 100,
+      },
+      activities: (logs || []).map((log) => ({
+        date: log.log_date,
+        activity_id: log.activity_id,
+        rating_id: log.rating_id,
+        marks: log.marks_earned,
+        notes: log.notes,
+      })),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch student progress report';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Batch Comparison Report
+router.get('/batch-comparison', async (req, res) => {
+  const period = (req.query.period as string) ?? 'monthly';
+  const limitStr = (req.query.limit as string) ?? '10';
+  const limit = Math.min(Math.max(1, parseInt(limitStr, 10)), 100);
+
+  let fromDate: string;
+  let toDate: string;
+
+  if (period === 'weekly') {
+    const weekStartDate = mondayOfWeek(new Date());
+    fromDate = toIsoDate(weekStartDate);
+    toDate = toIsoDate(addDays(weekStartDate, 6));
+  } else if (period === 'daily') {
+    fromDate = toIsoDate(new Date());
+    toDate = toIsoDate(new Date());
+  } else {
+    const monthStartDate = firstDayOfMonth(new Date());
+    fromDate = toIsoDate(monthStartDate);
+    toDate = toIsoDate(lastDayOfMonth(monthStartDate));
+  }
+
+  try {
+    // Get all activity logs for the period
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from('activity_logs')
+      .select('student_id, marks_earned')
+      .gte('log_date', fromDate)
+      .lte('log_date', toDate);
+
+    if (logsError) {
+      res.status(400).json({ error: logsError.message });
+      return;
+    }
+
+    // Group by batch
+    const { data: students, error: studentsError } = await supabaseAdmin
+      .from('students')
+      .select('id, batch_id');
+
+    if (studentsError) {
+      res.status(400).json({ error: studentsError.message });
+      return;
+    }
+
+    const studentBatchMap = new Map((students || []).map((s) => [s.id, s.batch_id]));
+    const batchStats = new Map<string, { students: Set<string>; total_marks: number; total_activities: number }>();
+
+    for (const log of logs || []) {
+      const batchId = studentBatchMap.get(log.student_id);
+      if (!batchId) continue;
+
+      if (!batchStats.has(batchId)) {
+        batchStats.set(batchId, { students: new Set(), total_marks: 0, total_activities: 0 });
+      }
+
+      const stats = batchStats.get(batchId)!;
+      stats.students.add(log.student_id);
+      stats.total_marks += Number(log.marks_earned) || 0;
+      stats.total_activities += 1;
+    }
+
+    // Get batch names
+    const { data: batches } = await supabaseAdmin.from('batches').select('id, name');
+    const batchNameMap = new Map((batches || []).map((b) => [b.id, b.name]));
+
+    const comparison = Array.from(batchStats.entries())
+      .map(([batchId, stats]) => ({
+        batch_id: batchId,
+        batch_name: batchNameMap.get(batchId),
+        student_count: stats.students.size,
+        total_marks: stats.total_marks,
+        total_activities: stats.total_activities,
+        average_marks_per_student: stats.students.size > 0 ? Math.round((stats.total_marks / stats.students.size) * 100) / 100 : 0,
+        average_activities_per_student: stats.students.size > 0 ? Math.round((stats.total_activities / stats.students.size) * 100) / 100 : 0,
+      }))
+      .sort((a, b) => b.total_marks - a.total_marks)
+      .slice(0, limit);
+
+    res.json({
+      period: { type: period, from_date: fromDate, to_date: toDate },
+      comparison,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch batch comparison report';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Teacher Activity Report
+router.get('/teacher/:teacherId', async (req, res) => {
+  const { teacherId } = req.params;
+  const period = (req.query.period as string) ?? 'monthly';
+  let fromDate: string;
+  let toDate: string;
+
+  if (period === 'weekly') {
+    const weekStartDate = mondayOfWeek(new Date());
+    fromDate = toIsoDate(weekStartDate);
+    toDate = toIsoDate(addDays(weekStartDate, 6));
+  } else {
+    const monthStartDate = firstDayOfMonth(new Date());
+    fromDate = toIsoDate(monthStartDate);
+    toDate = toIsoDate(lastDayOfMonth(monthStartDate));
+  }
+
+  try {
+    // Get teacher's batches
+    const { data: assignments, error: assignError } = await supabaseAdmin
+      .from('teacher_batches')
+      .select('batch_id')
+      .eq('teacher_id', teacherId);
+
+    if (assignError) {
+      res.status(400).json({ error: assignError.message });
+      return;
+    }
+
+    const batchIds = (assignments || []).map((a) => a.batch_id);
+    if (batchIds.length === 0) {
+      res.json({
+        teacher_id: teacherId,
+        period: { type: period, from_date: fromDate, to_date: toDate },
+        batches: [],
+      });
+      return;
+    }
+
+    // Get all students in these batches
+    const { data: students } = await supabaseAdmin
+      .from('students')
+      .select('id')
+      .in('batch_id', batchIds);
+
+    const studentIds = (students || []).map((s) => s.id);
+
+    // Get activity logs for these students
+    const { data: logs, error: logsError } = await supabaseAdmin
+      .from('activity_logs')
+      .select('student_id, marks_earned')
+      .in('student_id', studentIds)
+      .gte('log_date', fromDate)
+      .lte('log_date', toDate);
+
+    if (logsError) {
+      res.status(400).json({ error: logsError.message });
+      return;
+    }
+
+    // Aggregate by batch
+    const batchAggregates = new Map<string, { count: number; total_marks: number }>();
+    for (const log of logs || []) {
+      const batchId = (students || []).find((s) => s.id === log.student_id)?.batch_id;
+      if (!batchId) continue;
+
+      if (!batchAggregates.has(batchId)) {
+        batchAggregates.set(batchId, { count: 0, total_marks: 0 });
+      }
+
+      const agg = batchAggregates.get(batchId)!;
+      agg.count += 1;
+      agg.total_marks += Number(log.marks_earned) || 0;
+    }
+
+    // Get batch names
+    const { data: batchData } = await supabaseAdmin.from('batches').select('id, name').in('id', batchIds);
+    const batchNameMap = new Map((batchData || []).map((b) => [b.id, b.name]));
+
+    const batches = Array.from(batchAggregates.entries()).map(([batchId, agg]) => ({
+      batch_id: batchId,
+      batch_name: batchNameMap.get(batchId),
+      total_activities: agg.count,
+      total_marks: agg.total_marks,
+      average_marks: agg.count > 0 ? Math.round((agg.total_marks / agg.count) * 100) / 100 : 0,
+    }));
+
+    res.json({
+      teacher_id: teacherId,
+      period: { type: period, from_date: fromDate, to_date: toDate },
+      batches,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch teacher activity report';
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;

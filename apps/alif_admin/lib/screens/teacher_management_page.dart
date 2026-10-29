@@ -229,6 +229,9 @@ class _TeacherListViewState extends State<TeacherListView> {
   Future<void> _loadBatches() async {
     try {
       final batches = await BatchService.listBatches(status: 'active');
+      if (!mounted) {
+        return;
+      }
       setState(() => _batches = batches);
     } catch (_) {
       // Keep teacher list usable even if batches fail to load.
@@ -530,6 +533,7 @@ class _TeacherCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 560;
     return AlifCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -573,14 +577,30 @@ class _TeacherCard extends StatelessWidget {
                               color: AlifColors.textSecondary,
                             ),
                       ),
+                        if (compact) ...[
+                          const SizedBox(height: AlifSpacing.sm),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: AlifBadge(
+                              label: teacher.status.toUpperCase(),
+                              background: teacher.status == 'active'
+                                  ? AlifColors.primary
+                                  : AlifColors.neutral,
+                            ),
+                          ),
+                        ],
                   ],
                 ),
               ),
-              const SizedBox(width: AlifSpacing.md),
-              AlifBadge(
-                label: teacher.status.toUpperCase(),
-                background: teacher.status == 'active' ? AlifColors.primary : AlifColors.neutral,
-              ),
+                  if (!compact) ...[
+                    const SizedBox(width: AlifSpacing.md),
+                    AlifBadge(
+                      label: teacher.status.toUpperCase(),
+                      background: teacher.status == 'active'
+                          ? AlifColors.primary
+                          : AlifColors.neutral,
+                    ),
+                  ],
             ],
           ),
           const SizedBox(height: AlifSpacing.md),
@@ -618,11 +638,12 @@ class _TeacherCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AlifSpacing.md),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            spacing: AlifSpacing.md,
+            runSpacing: AlifSpacing.sm,
+            alignment: WrapAlignment.end,
             children: [
               FilledButton.tonal(onPressed: onEdit, child: const Text('Edit')),
-              const SizedBox(width: AlifSpacing.md),
               FilledButton.tonal(
                 style: FilledButton.styleFrom(backgroundColor: Colors.red.shade100),
                 onPressed: onDelete,

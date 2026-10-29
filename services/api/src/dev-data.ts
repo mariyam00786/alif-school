@@ -1,5 +1,7 @@
 import { randomUUID } from 'crypto';
 
+import { config } from './config';
+
 export type DevBatch = {
   id: string;
   name: string;
@@ -116,6 +118,16 @@ export type DevNotification = {
   created_at: string;
 };
 
+export type DevDeviceToken = {
+  profile_id: string;
+  role: string;
+  app_name: 'admin' | 'student_teacher';
+  platform: 'android' | 'ios' | 'web' | 'macos' | 'windows' | 'linux' | 'unknown';
+  device_token: string;
+  notifications_enabled: boolean;
+  last_seen_at: string;
+};
+
 export type DevStudentBadge = {
   id: string;
   student_id: string;
@@ -129,6 +141,8 @@ export type DevAuthUser = {
   full_name: string;
   role: 'admin' | 'teacher' | 'student' | 'parent';
 };
+
+const devStudentProfilePhotos = new Map<string, string>();
 
 const batches: DevBatch[] = [
   {
@@ -173,6 +187,7 @@ const classes: DevClass[] = [
 const students: DevStudent[] = [
   {
     id: '55555555-5555-4555-8555-555555555555',
+    profile_id: '10000000-0000-4000-8000-000000000003',
     parent_phone: '9999999999',
     father_name: 'Abdullah',
     mother_name: 'Amina',
@@ -350,6 +365,7 @@ const badges: DevBadge[] = [
   },
 ];
 const notifications: DevNotification[] = [];
+const deviceTokens: DevDeviceToken[] = [];
 const studentBadges: DevStudentBadge[] = [
   {
     id: randomUUID(),
@@ -478,6 +494,14 @@ function decorateActivityLog(log: DevActivityLog) {
 }
 
 export function shouldUseLocalData(error: unknown): boolean {
+  if (config.forceLiveDb) {
+    return false;
+  }
+
+  if (!config.allowLocalDataFallback) {
+    return false;
+  }
+
   const message =
     error instanceof Error
       ? error.message
@@ -1150,6 +1174,66 @@ export function createDevTeacherRemark(input: {
 
 export function getDevAuthUserByPhone(phone: string) {
   return authUsers.find((item) => item.phone === phone) ?? null;
+}
+
+export function getDevAuthUserById(id: string) {
+  return authUsers.find((item) => item.id === id) ?? null;
+}
+
+export function upsertDevDeviceToken(input: DevDeviceToken) {
+  const index = deviceTokens.findIndex((item) => item.device_token === input.device_token);
+  if (index === -1) {
+    deviceTokens.unshift(input);
+    return input;
+  }
+
+  deviceTokens[index] = {
+    ...deviceTokens[index],
+    ...input,
+  };
+
+  return deviceTokens[index];
+}
+
+export function deleteDevDeviceToken(profileId: string, token: string) {
+  const index = deviceTokens.findIndex(
+    (item) => item.profile_id === profileId && item.device_token === token
+  );
+
+  if (index === -1) {
+    return false;
+  }
+
+  deviceTokens.splice(index, 1);
+  return true;
+}
+
+export function listDevDeviceTokens(params: {
+  profile_ids?: string[];
+  notifications_enabled?: boolean;
+}) {
+  const profileIds = params.profile_ids ?? [];
+
+  return deviceTokens.filter((item) => {
+    if (params.notifications_enabled != null && item.notifications_enabled !== params.notifications_enabled) {
+      return false;
+    }
+
+    if (profileIds.length > 0 && !profileIds.includes(item.profile_id)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+export function getDevStudentProfilePhoto(studentId: string) {
+  return devStudentProfilePhotos.get(studentId) ?? null;
+}
+
+export function setDevStudentProfilePhoto(studentId: string, photoUrl: string) {
+  devStudentProfilePhotos.set(studentId, photoUrl);
+  return photoUrl;
 }
 
 export function listDevBadges(status?: string) {

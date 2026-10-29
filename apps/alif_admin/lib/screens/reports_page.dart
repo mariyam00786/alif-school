@@ -94,7 +94,7 @@ class _ReportsPageState extends State<ReportsPage> {
       lastDate: DateTime(2100),
     );
 
-    if (picked == null) {
+    if (!mounted || picked == null) {
       return;
     }
 

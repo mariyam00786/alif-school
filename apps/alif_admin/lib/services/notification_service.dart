@@ -35,9 +35,12 @@ class NotificationService {
     required String targetType,
     String? targetId,
     DateTime? scheduledAt,
+    String? frequency,
   }) async {
+    final isReminder = scheduledAt != null || frequency != null;
+    final endpoint = isReminder ? '/notifications/reminders' : '/notifications';
     final response = await http.post(
-      AppConfig.apiUri('/notifications'),
+      AppConfig.apiUri(endpoint),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'title': title,
@@ -45,6 +48,7 @@ class NotificationService {
         'target_type': targetType,
         'target_id': targetId,
         'scheduled_at': scheduledAt?.toIso8601String(),
+        if (isReminder) 'frequency': frequency ?? 'once',
       }),
     );
 

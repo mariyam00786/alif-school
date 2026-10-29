@@ -1,9 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:alif_design_system/alif_design_system.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+// Models
+import 'package:alif_student_teacher/models/student.dart';
+import 'package:alif_student_teacher/models/activity.dart';
+import 'package:alif_student_teacher/models/leaderboard.dart';
+import 'package:alif_student_teacher/models/auth_session.dart';
+import 'package:alif_student_teacher/config/app_config.dart';
+
+// Services
+import 'package:alif_student_teacher/services/api_service.dart';
+import 'package:alif_student_teacher/services/auth_service.dart';
+import 'package:alif_student_teacher/services/device_token_service.dart';
+import 'package:alif_student_teacher/services/fcm_service.dart';
+
+// Screens
+import 'package:alif_student_teacher/screens/login_page.dart';
+import 'package:alif_student_teacher/screens/student_badges_page.dart';
+import 'package:alif_student_teacher/screens/student_profile_page.dart';
+import 'package:alif_student_teacher/screens/teacher_dashboard_page.dart';
+import 'package:alif_student_teacher/screens/parent_insights_page.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Supabase.initialize(
+    url: AppConfig.supabaseUrl,
+    publishableKey: AppConfig.supabasePublishableKey,
+  );
+  
+  // Initialize FCM
+  try {
+    await FcmService.initialize();
+  } catch (e) {
+    debugPrint('FCM initialization error (continuing anyway): $e');
+  }
+  
   runApp(const StudentTeacherApp());
 }
 
@@ -16,19 +49,146 @@ class StudentTeacherApp extends StatelessWidget {
       title: 'Alif Student & Teacher',
       debugShowCheckedModeBanner: false,
       theme: AlifTheme.light(),
-      home: const StudentTeacherHomePage(),
+      home: const _StudentTeacherAppShell(),
     );
   }
 }
 
-class StudentTeacherHomePage extends StatelessWidget {
-  const StudentTeacherHomePage({super.key});
+class _StudentTeacherAppShell extends StatefulWidget {
+  const _StudentTeacherAppShell();
+
+  @override
+  State<_StudentTeacherAppShell> createState() => _StudentTeacherAppShellState();
+}
+
+class _StudentTeacherAppShellState extends State<_StudentTeacherAppShell> {
+  bool _restoring = true;
+  AuthSession? _session;
+  bool _tokenRefreshListenerAttached = false;
+
+  Future<void> _registerFcmForSession(AuthSession session) async {
+    final token = FcmService.getToken() ?? await FcmService.refreshToken();
+    if (token == null || token.isEmpty) {
+      return;
+    }
+
+    try {
+      await DeviceTokenService.registerToken(
+        accessToken: session.accessToken,
+        token: token,
+      );
+    } catch (error) {
+      debugPrint('FCM token registration failed: $error');
+    }
+
+    if (_tokenRefreshListenerAttached) {
+      return;
+    }
+
+    FcmService.onTokenRefresh((newToken) {
+      DeviceTokenService.registerToken(
+        accessToken: session.accessToken,
+        token: newToken,
+      ).catchError((error) {
+        debugPrint('FCM token refresh registration failed: $error');
+      });
+    });
+    _tokenRefreshListenerAttached = true;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSession();
+  }
+
+  Future<void> _restoreSession() async {
+    final session = await AuthService.restoreSession();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _session = session;
+      _restoring = false;
+    });
+
+    if (session != null) {
+      _registerFcmForSession(session);
+    }
+  }
+
+  Future<void> _signOut() async {
+    final session = _session;
+    final token = FcmService.getToken();
+    if (session != null && token != null && token.isNotEmpty) {
+      try {
+        await DeviceTokenService.unregisterToken(
+          accessToken: session.accessToken,
+          token: token,
+        );
+      } catch (error) {
+        debugPrint('FCM token unregister failed: $error');
+      }
+    }
+
+    await AuthService.logout();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _session = null);
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_restoring) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_session == null) {
+      return LoginPage(
+        onSignedIn: (session) {
+          setState(() => _session = session);
+          _registerFcmForSession(session);
+        },
+      );
+    }
+
+    return StudentTeacherHomePage(onSignOut: _signOut);
+  }
+}
+
+class StudentTeacherHomePage extends StatelessWidget {
+  const StudentTeacherHomePage({super.key, required this.onSignOut});
+
+  final Future<void> Function() onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = AuthService.currentSession;
     return Scaffold(
       backgroundColor: AlifColors.bg,
-      appBar: AppBar(title: const Text('Student & Teacher')),
+      appBar: AppBar(
+        title: const Text('Student & Teacher'),
+        actions: [
+          if (session != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: AlifSpacing.sm),
+                child: Text(
+                  '${session.user.fullName} (${session.user.role})',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ),
+          IconButton(
+            tooltip: 'Sign out',
+            onPressed: () async => onSignOut(),
+            icon: const Icon(Icons.logout_rounded),
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           const _LearningAtmosphereBackground(),
@@ -272,6 +432,8 @@ class _HeroStatChip extends StatelessWidget {
   }
 }
 
+// ====================== Daily Activity Marking Page ======================
+
 class DailyActivityMarkingPage extends StatefulWidget {
   const DailyActivityMarkingPage({super.key});
 
@@ -281,13 +443,13 @@ class DailyActivityMarkingPage extends StatefulWidget {
 }
 
 class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
+  static const int _maxBackfillDays = 30;
+
   bool _loading = true;
   bool _saving = false;
   String? _error;
   String? _studentId;
-  bool _parentMode = false;
-  bool _parentApproved = false;
-  final String _parentPhone = '9999999999';
+  DateTime _selectedDate = DateTime.now();
   List<LinkedStudent> _linkedStudents = const [];
   List<ActivityCategory> _categories = const [];
   List<ActivityItem> _activities = const [];
@@ -318,13 +480,13 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
         _error = null;
       });
 
-      final linkedStudents = await ApiService.getLinkedStudents(
-        parentPhone: _parentPhone,
-      );
-      final fallbackStudentId = await ApiService.getFirstStudentId();
-      final studentId = linkedStudents.isNotEmpty
+      final session = AuthService.currentSession;
+      final linkedStudents = session?.user.role == 'parent'
+          ? await ApiService.getLinkedStudents(parentPhone: session!.user.phone)
+          : const <LinkedStudent>[];
+      final fallbackStudentId = linkedStudents.isNotEmpty
           ? linkedStudents.first.id
-          : fallbackStudentId;
+          : await ApiService.getFirstStudentId();
       final categories = await ApiService.listCategories();
       final activities = await ApiService.listActivities();
       final ratings = await ApiService.listRatings();
@@ -334,8 +496,8 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
       }
 
       setState(() {
+        _studentId = fallbackStudentId;
         _linkedStudents = linkedStudents;
-        _studentId = studentId;
         _categories = categories;
         _activities = activities;
         _ratings = ratings;
@@ -354,31 +516,53 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
   }
 
   List<RatingOption> _ratingsForActivity(String activityId) {
-    final filtered = _ratings
-        .where((item) => item.activityId == activityId)
+    return _ratings
+      .where((item) => item.activityId == activityId)
         .toList(growable: false);
-    filtered.sort(
-      (left, right) => left.displayOrder.compareTo(right.displayOrder),
-    );
-    return filtered;
   }
 
-  Future<void> _saveToday() async {
+  String _dateLabel(DateTime date) {
+    final y = date.year.toString().padLeft(4, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    final d = date.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  Future<void> _pickLogDate() async {
+    final now = DateTime.now();
+    final firstDate = now.subtract(const Duration(days: _maxBackfillDays));
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: firstDate,
+      lastDate: now,
+    );
+
+    if (selected == null) {
+      return;
+    }
+
+    setState(() => _selectedDate = selected);
+  }
+
+  Future<void> _saveSelectedDate() async {
     if (_studentId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No active student found.')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No student selected.')),
+      );
       return;
     }
 
     if (_selectedRatings.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select at least one activity rating.')),
       );
       return;
     }
 
-    final today = DateTime.now().toIso8601String().split('T')[0];
+    final logDate = _dateLabel(_selectedDate);
 
     try {
       setState(() => _saving = true);
@@ -391,13 +575,12 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
             ? null
             : int.tryParse(quantityText);
 
-        await ApiService.upsertActivityLog(
+        await ApiService.createActivityLog(
           studentId: _studentId!,
           activityId: activityId,
           ratingId: ratingId,
-          logDate: today,
+          logDate: logDate,
           quantity: quantity,
-          parentApproved: _parentMode ? _parentApproved : null,
         );
       }
 
@@ -406,18 +589,21 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Today\'s activity marks saved successfully.'),
-        ),
+        SnackBar(content: Text('Activity marks saved for $logDate.')),
       );
+      _selectedRatings.clear();
+      for (final controller in _quantityControllers.values) {
+        controller.clear();
+      }
+      setState(() {});
     } catch (e) {
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to save marks: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save marks: $e')),
+      );
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -428,7 +614,9 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (_error != null) {
@@ -464,6 +652,7 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
         children: [
           AlifCard(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
@@ -471,7 +660,7 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
                     const SizedBox(width: AlifSpacing.sm),
                     Expanded(
                       child: Text(
-                        'Select rating for each activity and save once for today.',
+                        'Select a date, rate each activity, and save once.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: AlifColors.textSecondary,
                             ),
@@ -480,25 +669,31 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
                   ],
                 ),
                 const SizedBox(height: AlifSpacing.md),
-                SwitchListTile(
-                  value: _parentMode,
-                  onChanged: (value) {
-                    setState(() => _parentMode = value);
-                  },
-                  title: const Text('Parent Mode (Child Switch + Approval)'),
-                  contentPadding: EdgeInsets.zero,
+                Row(
+                  children: [
+                    const Icon(Icons.event_note_rounded, size: 20),
+                    const SizedBox(width: AlifSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        'Log Date: ${_dateLabel(_selectedDate)}',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    FilledButton.tonal(
+                      onPressed: _pickLogDate,
+                      child: const Text('Pick Date'),
+                    ),
+                  ],
                 ),
-                if (_parentMode) ...[
-                  const SizedBox(height: AlifSpacing.sm),
+                if (_linkedStudents.isNotEmpty) ...[
+                  const SizedBox(height: AlifSpacing.md),
                   DropdownButtonFormField<String>(
-                    initialValue: _linkedStudents.any((item) => item.id == _studentId)
-                        ? _studentId
-                        : null,
+                    initialValue: _studentId,
                     items: _linkedStudents
                         .map(
-                          (item) => DropdownMenuItem<String>(
-                            value: item.id,
-                            child: Text(item.displayName),
+                          (student) => DropdownMenuItem<String>(
+                            value: student.id,
+                            child: Text(student.name),
                           ),
                         )
                         .toList(growable: false),
@@ -507,18 +702,7 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
                         setState(() => _studentId = value);
                       }
                     },
-                    decoration: const InputDecoration(
-                      labelText: 'Select Child',
-                    ),
-                  ),
-                  const SizedBox(height: AlifSpacing.sm),
-                  CheckboxListTile(
-                    value: _parentApproved,
-                    onChanged: (value) {
-                      setState(() => _parentApproved = value ?? false);
-                    },
-                    title: const Text('Parent approval confirmed'),
-                    contentPadding: EdgeInsets.zero,
+                    decoration: const InputDecoration(labelText: 'Student'),
                   ),
                 ],
               ],
@@ -586,7 +770,8 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
                                           selected: current == option.id,
                                           onSelected: (_) {
                                             setState(() {
-                                              _selectedRatings[activity.id] = option.id;
+                                              _selectedRatings[activity.id] =
+                                                  option.id;
                                             });
                                           },
                                         ),
@@ -614,15 +799,19 @@ class _DailyActivityMarkingPageState extends State<DailyActivityMarkingPage> {
             ),
           const SizedBox(height: AlifSpacing.md),
           AlifButton(
-            label: _saving ? 'Saving...' : 'Save Today\'s Marks',
+            label: _saving
+                ? 'Saving...'
+                : 'Save Marks for ${_dateLabel(_selectedDate)}',
             isLoading: _saving,
-            onPressed: _saving ? null : _saveToday,
+            onPressed: _saving ? null : _saveSelectedDate,
           ),
         ],
       ),
     );
   }
 }
+
+// ====================== Leaderboard Page ======================
 
 class LeaderboardPage extends StatefulWidget {
   const LeaderboardPage({super.key});
@@ -753,6 +942,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   }
 }
 
+// ====================== Progress Page ======================
+
 class ProgressPage extends StatefulWidget {
   const ProgressPage({super.key});
 
@@ -861,7 +1052,7 @@ class _ProgressPageState extends State<ProgressPage> {
               ),
             const SizedBox(height: AlifSpacing.md),
             if (_rows.isEmpty)
-              const AlifCard(child: Text('No progress rows found.'))
+              const AlifCard(child: Text('No progress data available.'))
             else
               ..._rows.map(
                 (item) => Padding(
@@ -879,1485 +1070,6 @@ class _ProgressPageState extends State<ProgressPage> {
           ],
         ],
       ),
-    );
-  }
-}
-
-class StudentBadgesPage extends StatefulWidget {
-  const StudentBadgesPage({super.key});
-
-  @override
-  State<StudentBadgesPage> createState() => _StudentBadgesPageState();
-}
-
-class _StudentBadgesPageState extends State<StudentBadgesPage> {
-  bool _isLoading = true;
-  String? _error;
-  List<StudentBadgeItem> _badges = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-      final studentId = await ApiService.getFirstStudentId();
-      final items = await ApiService.getStudentBadges(studentId: studentId);
-      if (!mounted) {
-        return;
-      }
-      setState(() => _badges = items);
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Badges & Achievements')),
-      body: ListView(
-        padding: const EdgeInsets.all(AlifSpacing.md),
-        children: [
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (_error != null)
-            Text('Error: $_error', style: const TextStyle(color: Colors.red))
-          else if (_badges.isEmpty)
-            const AlifCard(child: Text('No badges earned yet.'))
-          else
-            ..._badges.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: AlifSpacing.md),
-                child: AlifCard(
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.workspace_premium_rounded,
-                        color: AlifColors.secondary,
-                      ),
-                      const SizedBox(width: AlifSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.name,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            if ((item.description ?? '').isNotEmpty)
-                              Text(
-                                item.description!,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            Text(
-                              'Bonus: ${item.bonusPoints} | Earned: ${item.earnedAt}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class StudentProfilePage extends StatefulWidget {
-  const StudentProfilePage({super.key});
-
-  @override
-  State<StudentProfilePage> createState() => _StudentProfilePageState();
-}
-
-class _StudentProfilePageState extends State<StudentProfilePage> {
-  bool _isLoading = true;
-  bool _isSaving = false;
-  String? _error;
-  StudentProfileData? _profile;
-  final TextEditingController _addressController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _addressController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-      final studentId = await ApiService.getFirstStudentId();
-      final profile = await ApiService.getStudentProfile(studentId: studentId);
-      if (!mounted) {
-        return;
-      }
-      _addressController.text = profile.address ?? '';
-      setState(() => _profile = profile);
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _save() async {
-    final profile = _profile;
-    if (profile == null) {
-      return;
-    }
-
-    try {
-      setState(() => _isSaving = true);
-      final updated = await ApiService.updateStudentProfile(
-        studentId: profile.id,
-        address: _addressController.text.trim(),
-      );
-      if (!mounted) {
-        return;
-      }
-      setState(() => _profile = updated);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Profile updated')));
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Update failed: $e')));
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: ListView(
-        padding: const EdgeInsets.all(AlifSpacing.md),
-        children: [
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (_error != null)
-            Text('Error: $_error', style: const TextStyle(color: Colors.red))
-          else if (_profile == null)
-            const AlifCard(child: Text('Profile not found.'))
-          else ...[
-            AlifCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Father: ${_profile!.fatherName}'),
-                  Text('Mother: ${_profile!.motherName}'),
-                  Text('Phone: ${_profile!.parentPhone}'),
-                  Text('Gender: ${_profile!.gender}'),
-                  Text('Batch: ${_profile!.batchName ?? '-'}'),
-                  Text('Class: ${_profile!.className ?? '-'}'),
-                ],
-              ),
-            ),
-            const SizedBox(height: AlifSpacing.md),
-            AlifCard(
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _addressController,
-                    decoration: const InputDecoration(labelText: 'Address'),
-                  ),
-                  const SizedBox(height: AlifSpacing.md),
-                  AlifButton(
-                    label: 'Save Profile',
-                    isLoading: _isSaving,
-                    onPressed: _isSaving ? null : _save,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class ParentInsightsPage extends StatefulWidget {
-  const ParentInsightsPage({super.key});
-
-  @override
-  State<ParentInsightsPage> createState() => _ParentInsightsPageState();
-}
-
-class _ParentInsightsPageState extends State<ParentInsightsPage> {
-  bool _isLoading = true;
-  String? _error;
-  final String _parentPhone = '9999999999';
-  List<LinkedStudent> _children = const [];
-  String? _selectedStudentId;
-  List<TeacherRemarkItem> _remarks = const [];
-  List<ApprovalHistoryItem> _approvalHistory = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-
-      final children = await ApiService.getLinkedStudents(parentPhone: _parentPhone);
-      final selected = _selectedStudentId ?? (children.isNotEmpty ? children.first.id : null);
-      final remarks = selected == null
-          ? const <TeacherRemarkItem>[]
-          : await ApiService.getTeacherRemarks(studentId: selected);
-      final history = selected == null
-          ? const <ApprovalHistoryItem>[]
-          : await ApiService.getStudentApprovalHistory(studentId: selected);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _children = children;
-        _selectedStudentId = selected;
-        _remarks = remarks;
-        _approvalHistory = history;
-      });
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Parent Insights')),
-      body: ListView(
-        padding: const EdgeInsets.all(AlifSpacing.md),
-        children: [
-          AlifCard(
-            child: Column(
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _children.any((child) => child.id == _selectedStudentId)
-                      ? _selectedStudentId
-                      : null,
-                  items: _children
-                      .map(
-                        (child) => DropdownMenuItem<String>(
-                          value: child.id,
-                          child: Text(child.displayName),
-                        ),
-                      )
-                      .toList(growable: false),
-                  onChanged: (value) async {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() => _selectedStudentId = value);
-                    await _load();
-                  },
-                  decoration: const InputDecoration(labelText: 'Child'),
-                ),
-                const SizedBox(height: AlifSpacing.sm),
-                FilledButton.tonalIcon(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AlifSpacing.md),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (_error != null)
-            Text('Error: $_error', style: const TextStyle(color: Colors.red))
-          else ...[
-            AlifCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Teacher Remarks',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: AlifSpacing.sm),
-                  if (_remarks.isEmpty)
-                    const Text('No teacher remarks yet.')
-                  else
-                    ..._remarks.map(
-                      (item) => Padding(
-                        padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
-                        child: Text(
-                          '• ${item.remark} (${item.teacherName ?? 'Teacher'})',
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AlifSpacing.md),
-            AlifCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Parent Approval History',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: AlifSpacing.sm),
-                  if (_approvalHistory.isEmpty)
-                    const Text('No approval logs yet.')
-                  else
-                    ..._approvalHistory.map(
-                      (item) => Padding(
-                        padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '${item.logDate} • ${item.activityName}',
-                              ),
-                            ),
-                            Text(
-                              item.parentApproved ? 'Approved' : 'Pending',
-                              style: TextStyle(
-                                color: item.parentApproved
-                                    ? AlifColors.success
-                                    : AlifColors.warning,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class TeacherRemarkComposerPage extends StatefulWidget {
-  const TeacherRemarkComposerPage({
-    super.key,
-    required this.student,
-  });
-
-  final TeacherStudentItem student;
-
-  @override
-  State<TeacherRemarkComposerPage> createState() => _TeacherRemarkComposerPageState();
-}
-
-class _TeacherRemarkComposerPageState extends State<TeacherRemarkComposerPage> {
-  bool _isLoading = true;
-  bool _isSubmitting = false;
-  String? _error;
-  String? _teacherId;
-  List<TeacherRemarkItem> _remarks = const [];
-  final TextEditingController _remarkController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _remarkController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-
-      final teacherId = _teacherId ?? await ApiService.getFirstTeacherId();
-      final remarks = await ApiService.getTeacherRemarks(studentId: widget.student.id);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _teacherId = teacherId;
-        _remarks = remarks;
-      });
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _submit() async {
-    final teacherId = _teacherId;
-    final text = _remarkController.text.trim();
-    if (teacherId == null || text.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid remark first.')),
-      );
-      return;
-    }
-
-    try {
-      setState(() => _isSubmitting = true);
-      await ApiService.createTeacherRemark(
-        teacherId: teacherId,
-        studentId: widget.student.id,
-        remark: text,
-      );
-      _remarkController.clear();
-      await _load();
-
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Remark saved.')));
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save remark: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Teacher Remark')),
-      body: ListView(
-        padding: const EdgeInsets.all(AlifSpacing.md),
-        children: [
-          AlifCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.student.displayName,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(widget.student.parentPhone),
-                const SizedBox(height: AlifSpacing.md),
-                TextField(
-                  controller: _remarkController,
-                  minLines: 2,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Remark',
-                    hintText: 'Add observation, advice, or follow-up note',
-                  ),
-                ),
-                const SizedBox(height: AlifSpacing.md),
-                AlifButton(
-                  label: _isSubmitting ? 'Saving...' : 'Save Remark',
-                  isLoading: _isSubmitting,
-                  onPressed: _isSubmitting ? null : _submit,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AlifSpacing.md),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (_error != null)
-            Text('Error: $_error', style: const TextStyle(color: Colors.red))
-          else if (_remarks.isEmpty)
-            const AlifCard(child: Text('No remarks yet for this student.'))
-          else
-            ..._remarks.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
-                child: AlifCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(item.remark),
-                      const SizedBox(height: AlifSpacing.xs),
-                      Text(
-                        '${item.teacherName ?? 'Teacher'} • ${item.createdAt}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class TeacherDashboardPage extends StatefulWidget {
-  const TeacherDashboardPage({super.key});
-
-  @override
-  State<TeacherDashboardPage> createState() => _TeacherDashboardPageState();
-}
-
-class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
-  bool _isLoading = true;
-  String? _error;
-  List<TeacherBatchItem> _batches = const [];
-  String? _selectedBatchId;
-  TeacherBatchAnalytics? _analytics;
-  List<TeacherStudentItem> _students = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-
-      final batches = await ApiService.getTeacherBatches();
-      final selected = _selectedBatchId ?? (batches.isNotEmpty ? batches.first.id : null);
-      final analytics = selected == null
-          ? null
-          : await ApiService.getTeacherBatchAnalytics(batchId: selected);
-      final students = await ApiService.getTeacherStudents(batchId: selected);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _batches = batches;
-        _selectedBatchId = selected;
-        _analytics = analytics;
-        _students = students;
-      });
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Teacher Dashboard')),
-      body: ListView(
-        padding: const EdgeInsets.all(AlifSpacing.md),
-        children: [
-          AlifCard(
-            child: Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedBatchId,
-                    items: _batches
-                        .map(
-                          (batch) => DropdownMenuItem(
-                            value: batch.id,
-                            child: Text(batch.name),
-                          ),
-                        )
-                        .toList(growable: false),
-                    onChanged: (value) async {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() => _selectedBatchId = value);
-                      await _load();
-                    },
-                    decoration: const InputDecoration(labelText: 'Batch'),
-                  ),
-                ),
-                const SizedBox(width: AlifSpacing.sm),
-                FilledButton.tonalIcon(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AlifSpacing.md),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (_error != null)
-            Text('Error: $_error', style: const TextStyle(color: Colors.red))
-          else ...[
-            if (_analytics != null)
-              AlifCard(
-                child: Wrap(
-                  spacing: AlifSpacing.md,
-                  runSpacing: AlifSpacing.sm,
-                  children: [
-                    Text('Students: ${_analytics!.students}'),
-                    Text('Marks: ${_analytics!.totalMarks}'),
-                    Text('Activities: ${_analytics!.totalActivities}'),
-                    Text('Completion: ${_analytics!.completionRate}'),
-                  ],
-                ),
-              ),
-            const SizedBox(height: AlifSpacing.md),
-            if (_students.isEmpty)
-              const AlifCard(child: Text('No students found in this batch.'))
-            else
-              ..._students.map(
-                (student) => Padding(
-                  padding: const EdgeInsets.only(bottom: AlifSpacing.sm),
-                  child: AlifCard(
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                student.displayName,
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              Text(
-                                student.parentPhone,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Add remark',
-                          icon: const Icon(Icons.rate_review_rounded),
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => TeacherRemarkComposerPage(student: student),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class AppConfig {
-  AppConfig._();
-
-  static const String _apiBaseUrl = String.fromEnvironment(
-    'ALIF_API_BASE_URL',
-    defaultValue: 'http://localhost:4000/api',
-  );
-
-  static Uri apiUri(String path, {Map<String, String>? queryParameters}) {
-    final normalizedBase = _apiBaseUrl.endsWith('/')
-        ? _apiBaseUrl.substring(0, _apiBaseUrl.length - 1)
-        : _apiBaseUrl;
-    final normalizedPath = path.startsWith('/') ? path : '/$path';
-
-    return Uri.parse('$normalizedBase$normalizedPath').replace(
-      queryParameters: queryParameters == null || queryParameters.isEmpty
-          ? null
-          : queryParameters,
-    );
-  }
-}
-
-class ApiService {
-  static Future<String> getFirstStudentId() async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/students',
-        queryParameters: {'limit': '1', 'offset': '0', 'status': 'active'},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load students: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final list = (decoded['data'] as List<dynamic>? ?? const []);
-    if (list.isEmpty) {
-      throw Exception('No active students available');
-    }
-
-    return (list.first as Map<String, dynamic>)['id'] as String;
-  }
-
-  static Future<String> getFirstTeacherId() async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/teachers',
-        queryParameters: {'status': 'active'},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load teachers: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    if (decoded.isEmpty) {
-      throw Exception('No active teachers available');
-    }
-
-    return (decoded.first as Map<String, dynamic>)['id'] as String;
-  }
-
-  static Future<List<ActivityCategory>> listCategories() async {
-    final response = await http.get(
-      AppConfig.apiUri('/categories', queryParameters: {'status': 'active'}),
-    );
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load categories: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => ActivityCategory.fromJson(item as Map<String, dynamic>))
-        .toList();
-  }
-
-  static Future<List<ActivityItem>> listActivities() async {
-    final response = await http.get(
-      AppConfig.apiUri('/activities', queryParameters: {'status': 'active'}),
-    );
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load activities: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => ActivityItem.fromJson(item as Map<String, dynamic>))
-        .toList();
-  }
-
-  static Future<List<RatingOption>> listRatings() async {
-    final response = await http.get(AppConfig.apiUri('/ratings'));
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load ratings: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => RatingOption.fromJson(item as Map<String, dynamic>))
-        .toList();
-  }
-
-  static Future<void> upsertActivityLog({
-    required String studentId,
-    required String activityId,
-    required String ratingId,
-    required String logDate,
-    int? quantity,
-    bool? parentApproved,
-  }) async {
-    final response = await http.post(
-      AppConfig.apiUri('/activity-logs'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'student_id': studentId,
-        'activity_id': activityId,
-        'rating_id': ratingId,
-        'log_date': logDate,
-        'quantity': quantity,
-        'parent_approved': parentApproved,
-      }),
-    );
-
-    if (response.statusCode != 201) {
-      throw Exception('Failed to save activity log: ${response.body}');
-    }
-  }
-
-  static Future<List<LeaderboardRow>> getLeaderboard({
-    required String period,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri('/student/leaderboard', queryParameters: {'period': period}),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load leaderboard: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final list = decoded['data'] as List<dynamic>? ?? const [];
-    return list
-        .map((item) => LeaderboardRow.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-
-  static Future<ProgressResult> getWeeklyProgress({
-    required String studentId,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/student/progress/weekly',
-        queryParameters: {'student_id': studentId},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load weekly progress: ${response.statusCode}');
-    }
-
-    return ProgressResult.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  static Future<ProgressResult> getMonthlyProgress({
-    required String studentId,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/student/progress/monthly',
-        queryParameters: {'student_id': studentId},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load monthly progress: ${response.statusCode}');
-    }
-
-    return ProgressResult.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  static Future<List<StudentBadgeItem>> getStudentBadges({
-    required String studentId,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/student/badges',
-        queryParameters: {'student_id': studentId},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load student badges: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => StudentBadgeItem.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-
-  static Future<StudentProfileData> getStudentProfile({
-    required String studentId,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/student/profile',
-        queryParameters: {'student_id': studentId},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load student profile: ${response.statusCode}');
-    }
-
-    return StudentProfileData.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  static Future<StudentProfileData> updateStudentProfile({
-    required String studentId,
-    required String address,
-  }) async {
-    final response = await http.put(
-      AppConfig.apiUri(
-        '/student/profile',
-        queryParameters: {'student_id': studentId},
-      ),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'address': address}),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to update student profile: ${response.statusCode}');
-    }
-
-    return StudentProfileData.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  static Future<List<LinkedStudent>> getLinkedStudents({
-    required String parentPhone,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/student/children',
-        queryParameters: {'parent_phone': parentPhone},
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load linked children: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => LinkedStudent.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-
-  static Future<List<TeacherBatchItem>> getTeacherBatches() async {
-    final response = await http.get(AppConfig.apiUri('/teacher/batches'));
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load teacher batches: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    if (decoded.isEmpty) {
-      return const [];
-    }
-
-    final first = decoded.first as Map<String, dynamic>;
-    final rawBatches = first['batches'] as List<dynamic>? ?? const [];
-    return rawBatches
-        .map((item) => TeacherBatchItem.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-
-  static Future<List<TeacherStudentItem>> getTeacherStudents({String? batchId}) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/teacher/students',
-        queryParameters: {
-          if (batchId != null && batchId.isNotEmpty) 'batch_id': batchId,
-        },
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load teacher students: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => TeacherStudentItem.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-
-  static Future<TeacherBatchAnalytics> getTeacherBatchAnalytics({
-    required String batchId,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri('/teacher/batch/$batchId/analytics'),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load teacher analytics: ${response.statusCode}');
-    }
-
-    return TeacherBatchAnalytics.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  static Future<List<TeacherRemarkItem>> getTeacherRemarks({
-    required String studentId,
-    int limit = 25,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/remarks',
-        queryParameters: {
-          'student_id': studentId,
-          'limit': '$limit',
-        },
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load remarks: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => TeacherRemarkItem.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-
-  static Future<void> createTeacherRemark({
-    required String teacherId,
-    required String studentId,
-    required String remark,
-  }) async {
-    final response = await http.post(
-      AppConfig.apiUri('/remarks'),
-      headers: {
-        'Content-Type': 'application/json',
-        'x-alif-role': 'teacher',
-      },
-      body: jsonEncode({
-        'teacher_id': teacherId,
-        'student_id': studentId,
-        'remark': remark,
-      }),
-    );
-
-    if (response.statusCode != 201) {
-      throw Exception('Failed to create remark: ${response.body}');
-    }
-  }
-
-  static Future<List<ApprovalHistoryItem>> getStudentApprovalHistory({
-    required String studentId,
-    int limit = 30,
-  }) async {
-    final response = await http.get(
-      AppConfig.apiUri(
-        '/student/approval-history',
-        queryParameters: {
-          'student_id': studentId,
-          'limit': '$limit',
-        },
-      ),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load approval history: ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((item) => ApprovalHistoryItem.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-  }
-}
-
-class ActivityCategory {
-  final String id;
-  final String name;
-  final String? nameMl;
-
-  const ActivityCategory({
-    required this.id,
-    required this.name,
-    required this.nameMl,
-  });
-
-  factory ActivityCategory.fromJson(Map<String, dynamic> json) {
-    return ActivityCategory(
-      id: json['id'] as String,
-      name: json['name'] as String? ?? '',
-      nameMl: json['name_ml'] as String?,
-    );
-  }
-}
-
-class ActivityItem {
-  final String id;
-  final String categoryId;
-  final String name;
-  final String? nameMl;
-  final bool hasQuantity;
-
-  const ActivityItem({
-    required this.id,
-    required this.categoryId,
-    required this.name,
-    required this.nameMl,
-    required this.hasQuantity,
-  });
-
-  factory ActivityItem.fromJson(Map<String, dynamic> json) {
-    return ActivityItem(
-      id: json['id'] as String,
-      categoryId: json['category_id'] as String,
-      name: json['name'] as String? ?? '',
-      nameMl: json['name_ml'] as String?,
-      hasQuantity: json['has_quantity'] as bool? ?? false,
-    );
-  }
-}
-
-class RatingOption {
-  final String id;
-  final String activityId;
-  final String ratingName;
-  final int marks;
-  final int displayOrder;
-
-  const RatingOption({
-    required this.id,
-    required this.activityId,
-    required this.ratingName,
-    required this.marks,
-    required this.displayOrder,
-  });
-
-  factory RatingOption.fromJson(Map<String, dynamic> json) {
-    return RatingOption(
-      id: json['id'] as String,
-      activityId: json['activity_id'] as String,
-      ratingName: json['rating_name'] as String? ?? '',
-      marks: json['marks'] as int? ?? 0,
-      displayOrder: json['display_order'] as int? ?? 0,
-    );
-  }
-}
-
-class LeaderboardRow {
-  const LeaderboardRow({
-    required this.rank,
-    required this.studentName,
-    required this.totalMarks,
-    required this.activitiesCompleted,
-    this.batchName,
-  });
-
-  final int rank;
-  final String studentName;
-  final int totalMarks;
-  final int activitiesCompleted;
-  final String? batchName;
-
-  factory LeaderboardRow.fromJson(Map<String, dynamic> json) {
-    return LeaderboardRow(
-      rank: (json['rank'] as num? ?? 0).toInt(),
-      studentName: json['student_name'] as String? ?? '-',
-      totalMarks: (json['total_marks'] as num? ?? 0).toInt(),
-      activitiesCompleted: (json['activities_completed'] as num? ?? 0).toInt(),
-      batchName: json['batch_name'] as String?,
-    );
-  }
-}
-
-class ProgressSummary {
-  const ProgressSummary({
-    required this.totalMarks,
-    required this.totalActivities,
-  });
-
-  final int totalMarks;
-  final int totalActivities;
-
-  factory ProgressSummary.fromJson(Map<String, dynamic> json) {
-    return ProgressSummary(
-      totalMarks: (json['total_marks'] as num? ?? 0).toInt(),
-      totalActivities: (json['total_activities'] as num? ?? 0).toInt(),
-    );
-  }
-}
-
-class ProgressLogRow {
-  const ProgressLogRow({
-    required this.logDate,
-    required this.marksEarned,
-  });
-
-  final String logDate;
-  final int marksEarned;
-
-  factory ProgressLogRow.fromJson(Map<String, dynamic> json) {
-    return ProgressLogRow(
-      logDate: json['log_date'] as String? ?? '-',
-      marksEarned: (json['marks_earned'] as num? ?? 0).toInt(),
-    );
-  }
-}
-
-class ProgressResult {
-  const ProgressResult({required this.summary, required this.rows});
-
-  final ProgressSummary summary;
-  final List<ProgressLogRow> rows;
-
-  factory ProgressResult.fromJson(Map<String, dynamic> json) {
-    return ProgressResult(
-      summary: ProgressSummary.fromJson(
-        json['summary'] as Map<String, dynamic>? ?? const {},
-      ),
-      rows: (json['data'] as List<dynamic>? ?? const [])
-          .map((item) => ProgressLogRow.fromJson(item as Map<String, dynamic>))
-          .toList(growable: false),
-    );
-  }
-}
-
-class StudentBadgeItem {
-  const StudentBadgeItem({
-    required this.name,
-    this.description,
-    required this.bonusPoints,
-    required this.earnedAt,
-  });
-
-  final String name;
-  final String? description;
-  final int bonusPoints;
-  final String earnedAt;
-
-  factory StudentBadgeItem.fromJson(Map<String, dynamic> json) {
-    final badge = json['badges'] as Map<String, dynamic>? ?? const {};
-    return StudentBadgeItem(
-      name: badge['name'] as String? ?? '-',
-      description: badge['description'] as String?,
-      bonusPoints: (badge['bonus_points'] as num? ?? 0).toInt(),
-      earnedAt: json['earned_at'] as String? ?? '-',
-    );
-  }
-}
-
-class StudentProfileData {
-  const StudentProfileData({
-    required this.id,
-    required this.fatherName,
-    required this.motherName,
-    required this.parentPhone,
-    required this.gender,
-    this.address,
-    this.batchName,
-    this.className,
-  });
-
-  final String id;
-  final String fatherName;
-  final String motherName;
-  final String parentPhone;
-  final String gender;
-  final String? address;
-  final String? batchName;
-  final String? className;
-
-  factory StudentProfileData.fromJson(Map<String, dynamic> json) {
-    final batch = json['batches'] as Map<String, dynamic>?;
-    final classInfo = json['classes'] as Map<String, dynamic>?;
-    return StudentProfileData(
-      id: json['id'] as String? ?? '',
-      fatherName: json['father_name'] as String? ?? '-',
-      motherName: json['mother_name'] as String? ?? '-',
-      parentPhone: json['parent_phone'] as String? ?? '-',
-      gender: json['gender'] as String? ?? '-',
-      address: json['address'] as String?,
-      batchName: batch?['name'] as String?,
-      className: classInfo?['name'] as String?,
-    );
-  }
-}
-
-class LinkedStudent {
-  const LinkedStudent({
-    required this.id,
-    required this.fatherName,
-    required this.motherName,
-  });
-
-  final String id;
-  final String fatherName;
-  final String motherName;
-
-  String get displayName => '$fatherName / $motherName';
-
-  factory LinkedStudent.fromJson(Map<String, dynamic> json) {
-    return LinkedStudent(
-      id: json['id'] as String? ?? '',
-      fatherName: json['father_name'] as String? ?? '-',
-      motherName: json['mother_name'] as String? ?? '-',
-    );
-  }
-}
-
-class TeacherBatchItem {
-  const TeacherBatchItem({required this.id, required this.name});
-
-  final String id;
-  final String name;
-
-  factory TeacherBatchItem.fromJson(Map<String, dynamic> json) {
-    return TeacherBatchItem(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '-',
-    );
-  }
-}
-
-class TeacherStudentItem {
-  const TeacherStudentItem({
-    required this.id,
-    required this.fatherName,
-    required this.motherName,
-    required this.parentPhone,
-  });
-
-  final String id;
-  final String fatherName;
-  final String motherName;
-  final String parentPhone;
-
-  String get displayName => '$fatherName / $motherName';
-
-  factory TeacherStudentItem.fromJson(Map<String, dynamic> json) {
-    return TeacherStudentItem(
-      id: json['id'] as String? ?? '',
-      fatherName: json['father_name'] as String? ?? '-',
-      motherName: json['mother_name'] as String? ?? '-',
-      parentPhone: json['parent_phone'] as String? ?? '-',
-    );
-  }
-}
-
-class TeacherRemarkItem {
-  const TeacherRemarkItem({
-    required this.id,
-    required this.remark,
-    required this.createdAt,
-    this.teacherName,
-  });
-
-  final String id;
-  final String remark;
-  final String createdAt;
-  final String? teacherName;
-
-  factory TeacherRemarkItem.fromJson(Map<String, dynamic> json) {
-    return TeacherRemarkItem(
-      id: json['id'] as String? ?? '',
-      remark: json['remark'] as String? ?? '-',
-      createdAt: json['created_at'] as String? ?? '-',
-      teacherName: json['teacher_name'] as String?,
-    );
-  }
-}
-
-class ApprovalHistoryItem {
-  const ApprovalHistoryItem({
-    required this.id,
-    required this.logDate,
-    required this.parentApproved,
-    required this.activityName,
-    required this.marksEarned,
-  });
-
-  final String id;
-  final String logDate;
-  final bool parentApproved;
-  final String activityName;
-  final int marksEarned;
-
-  factory ApprovalHistoryItem.fromJson(Map<String, dynamic> json) {
-    final activity = json['activities'] as Map<String, dynamic>? ?? const {};
-    return ApprovalHistoryItem(
-      id: json['id'] as String? ?? '',
-      logDate: json['log_date'] as String? ?? '-',
-      parentApproved: json['parent_approved'] as bool? ?? false,
-      activityName: activity['name'] as String? ?? '-',
-      marksEarned: (json['marks_earned'] as num? ?? 0).toInt(),
-    );
-  }
-}
-
-class TeacherBatchAnalytics {
-  const TeacherBatchAnalytics({
-    required this.students,
-    required this.totalMarks,
-    required this.totalActivities,
-    required this.completionRate,
-  });
-
-  final int students;
-  final int totalMarks;
-  final int totalActivities;
-  final double completionRate;
-
-  factory TeacherBatchAnalytics.fromJson(Map<String, dynamic> json) {
-    final summary = json['summary'] as Map<String, dynamic>? ?? const {};
-    return TeacherBatchAnalytics(
-      students: (summary['students'] as num? ?? 0).toInt(),
-      totalMarks: (summary['total_marks'] as num? ?? 0).toInt(),
-      totalActivities: (summary['total_activities'] as num? ?? 0).toInt(),
-      completionRate: (summary['completion_rate'] as num? ?? 0).toDouble(),
     );
   }
 }

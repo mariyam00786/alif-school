@@ -10,8 +10,11 @@
     "doc": "docs"
   },
   "scripts": {
-    "app:student": "cd apps/alif_student_teacher && flutter run -d chrome",
-    "app:admin": "cd apps/alif_admin && flutter run -d chrome --dart-define-from-file=env/dev.json",
+    "web": "npm run dev --prefix apps/alif_web",
+    "app:student": "cd apps/alif_student_teacher && flutter run -d chrome --web-port=3001 --dart-define-from-file=env/dev.json",
+    "app:admin": "cd apps/alif_admin && flutter run -d chrome --web-port=3000 --dart-define-from-file=env/dev.json",
+    "app:student:web": "cd apps/alif_student_teacher && flutter run -d web-server --web-port=3001 --web-hostname=localhost --dart-define-from-file=env/dev.json",
+    "app:admin:web": "cd apps/alif_admin && flutter run -d web-server --web-port=3000 --web-hostname=localhost --dart-define-from-file=env/dev.json",
     "supabase:login": "supabase login",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",

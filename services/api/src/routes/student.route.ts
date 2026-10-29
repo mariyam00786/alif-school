@@ -1,11 +1,14 @@
 import { Router } from 'express';
 
 import {
+  getDevAuthUserById,
   getDevBatch,
   getDevStudent,
+  getDevStudentProfilePhoto,
   listDevActivityLogs,
   listDevStudentBadges,
   listDevStudents,
+  setDevStudentProfilePhoto,
   shouldUseLocalData,
   updateDevStudent,
 } from '../dev-data';
@@ -17,10 +20,13 @@ import {
   StudentLeaderboardQuerySchema,
   StudentProfileQuerySchema,
   StudentProgressQuerySchema,
+  UploadStudentProfilePhotoSchema,
   UpdateStudentProfileSchema,
 } from '../schemas/student-app.schema';
 
 const router = Router();
+const PROFILE_PHOTOS_BUCKET = 'profile-photos';
+let profilePhotoBucketEnsured = false;
 
 function toIsoDate(value: Date) {
   return value.toISOString().split('T')[0];
@@ -82,6 +88,105 @@ function aggregateMarks(logs: Array<{ student_id: string; marks_earned: number }
   }
 
   return Array.from(map.values()).sort((left, right) => right.total_marks - left.total_marks);
+}
+
+function getDevUserFromRequest(authHeader: string | undefined) {
+  const value = String(authHeader ?? '').trim();
+  if (!value.toLowerCase().startsWith('bearer dev-')) {
+    return null;
+  }
+
+  const id = value.substring('Bearer '.length).replace(/^dev-/, '');
+  return getDevAuthUserById(id);
+}
+
+async function getSupabaseUserFromRequest(authHeader: string | undefined) {
+  const value = String(authHeader ?? '').trim();
+  if (!value.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+
+  const token = value.substring('Bearer '.length).trim();
+  if (!token || token.startsWith('dev-')) {
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !data.user) {
+    return null;
+  }
+
+  return data.user;
+}
+
+function toStudentName(student: { father_name?: string | null; mother_name?: string | null }) {
+  return [student.father_name, student.mother_name]
+    .filter((name): name is string => Boolean(name && name.trim().length > 0))
+    .join(' / ');
+}
+
+function toChildSummary(student: {
+  id: string;
+  father_name?: string | null;
+  mother_name?: string | null;
+  batch_id?: string | null;
+}) {
+  return {
+    id: student.id,
+    student_name: toStudentName(student),
+    batch_name: student.batch_id ? getDevBatch(student.batch_id)?.name ?? 'Unassigned' : 'Unassigned',
+  };
+}
+
+async function ensureProfilePhotoBucket() {
+  if (profilePhotoBucketEnsured) {
+    return;
+  }
+
+  const { data, error } = await supabaseAdmin.storage.listBuckets();
+  if (error) {
+    throw error;
+  }
+
+  const exists = (data || []).some((bucket) => bucket.id === PROFILE_PHOTOS_BUCKET);
+  if (!exists) {
+    const { error: createError } = await supabaseAdmin.storage.createBucket(PROFILE_PHOTOS_BUCKET, {
+      public: false,
+      fileSizeLimit: '5MB',
+      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+    });
+
+    if (createError && !createError.message.toLowerCase().includes('already exists')) {
+      throw createError;
+    }
+  }
+
+  profilePhotoBucketEnsured = true;
+}
+
+async function toProfileResponse(student: any) {
+  const photoPath = student?.profiles?.profile_photo ?? null;
+  let photoUrl: string | null = null;
+
+  if (photoPath) {
+    const { data } = await supabaseAdmin.storage
+      .from(PROFILE_PHOTOS_BUCKET)
+      .createSignedUrl(photoPath, 60 * 60);
+    photoUrl = data?.signedUrl ?? null;
+  }
+
+  return {
+    id: student.id,
+    father_name: student.father_name ?? 'Unknown',
+    mother_name: student.mother_name ?? 'Unknown',
+    date_of_birth: student.date_of_birth ?? '',
+    gender: student.gender ?? '',
+    address: student.address ?? '',
+    batch_name: student.batches?.name ?? 'Unassigned',
+    class_name: student.classes?.name ?? 'Unassigned',
+    profile_photo_path: photoPath,
+    profile_photo_url: photoUrl,
+  };
 }
 
 router.get('/leaderboard', async (req, res) => {
@@ -305,15 +410,32 @@ router.get('/badges', async (req, res) => {
 
     if (error) {
       if (shouldUseLocalData(error)) {
-        res.json(listDevStudentBadges(query.student_id));
+        res.json(
+          listDevStudentBadges(query.student_id).map((item: any) => ({
+            id: item.id,
+            badge_name: item.name ?? item.badge_name ?? 'Badge',
+            badge_icon: item.icon ?? item.badge_icon ?? null,
+            description: item.description ?? null,
+            awarded_at: item.earned_at ?? item.awarded_at ?? null,
+            earned: true,
+          })),
+        );
         return;
       }
 
       res.status(400).json({ error: error.message });
       return;
     }
-
-    res.json(data || []);
+    res.json(
+      (data || []).map((item: any) => ({
+        id: item.id,
+        badge_name: item.badges?.name ?? 'Badge',
+        badge_icon: item.badges?.icon ?? null,
+        description: item.badges?.description ?? null,
+        awarded_at: item.earned_at ?? null,
+        earned: true,
+      })),
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch student badges';
     res.status(500).json({ error: msg });
@@ -327,7 +449,7 @@ router.get('/profile', async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from('students')
       .select(
-        'id, parent_phone, father_name, mother_name, date_of_birth, gender, batch_id, class_id, address, enrollment_date, status, batches(id, name), classes(id, name, level)'
+        'id, parent_phone, father_name, mother_name, date_of_birth, gender, batch_id, class_id, address, enrollment_date, status, batches(id, name), classes(id, name, level), profiles(profile_photo)'
       )
       .eq('id', query.student_id)
       .single();
@@ -340,15 +462,25 @@ router.get('/profile', async (req, res) => {
           return;
         }
 
-        res.json(student);
+        res.json({
+          id: student.id,
+          father_name: student.father_name,
+          mother_name: student.mother_name,
+          date_of_birth: student.date_of_birth,
+          gender: student.gender,
+          address: student.address ?? '',
+          batch_name: (student as any).batch_name ?? 'Unassigned',
+          class_name: (student as any).class_name ?? 'Unassigned',
+          profile_photo_path: getDevStudentProfilePhoto(student.id),
+          profile_photo_url: getDevStudentProfilePhoto(student.id),
+        });
         return;
       }
 
       res.status(404).json({ error: 'Student not found' });
       return;
     }
-
-    res.json(data);
+    res.json(await toProfileResponse(data));
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch student profile';
     res.status(500).json({ error: msg });
@@ -371,15 +503,14 @@ router.get('/children', async (req, res) => {
           limit: 500,
           offset: 0,
         }).data.filter((item) => item.parent_phone === query.parent_phone);
-        res.json(fallback);
+        res.json(fallback.map((item) => toChildSummary(item)));
         return;
       }
 
       res.status(400).json({ error: error.message });
       return;
     }
-
-    res.json(data || []);
+    res.json((data || []).map((item) => toChildSummary(item)));
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch linked children';
     res.status(500).json({ error: msg });
@@ -416,6 +547,114 @@ router.get('/approval-history', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch approval history';
     res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/profile-photo', async (req, res) => {
+  const authUser = getDevUserFromRequest(req.header('authorization'));
+  const supabaseUser = await getSupabaseUserFromRequest(req.header('authorization'));
+  if (!authUser && !supabaseUser) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const body = UploadStudentProfilePhotoSchema.parse(req.body);
+
+    const { data: student, error: studentError } = await supabaseAdmin
+      .from('students')
+      .select('id, profile_id')
+      .eq('id', body.student_id)
+      .single();
+
+    if (studentError) {
+      if (shouldUseLocalData(studentError)) {
+        const url = `data:${body.content_type};base64,${body.data_base64}`;
+        setDevStudentProfilePhoto(body.student_id, url);
+        res.status(201).json({ profile_photo_path: url, profile_photo_url: url });
+        return;
+      }
+
+      res.status(400).json({ error: studentError.message });
+      return;
+    }
+
+    if (!student?.profile_id) {
+      res.status(409).json({ error: 'Student is not linked to a profile record' });
+      return;
+    }
+
+    if (supabaseUser) {
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('id', supabaseUser.id)
+        .single();
+
+      if (profileError || !profile) {
+        res.status(403).json({ error: 'Authenticated profile not found' });
+        return;
+      }
+
+      if (profile.role !== 'admin' && student.profile_id !== supabaseUser.id) {
+        const { data: parentLink, error: parentLinkError } = await supabaseAdmin
+          .from('parent_students')
+          .select('id')
+          .eq('parent_profile_id', supabaseUser.id)
+          .eq('student_id', body.student_id)
+          .maybeSingle();
+
+        if (parentLinkError || !parentLink) {
+          res.status(403).json({ error: 'Not allowed to update this student profile photo' });
+          return;
+        }
+      }
+    }
+
+    await ensureProfilePhotoBucket();
+    const sanitizedFileName = body.file_name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const objectPath = `${body.student_id}/${Date.now()}-${sanitizedFileName}`;
+    const bytes = Buffer.from(body.data_base64, 'base64');
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(PROFILE_PHOTOS_BUCKET)
+      .upload(objectPath, bytes, {
+        contentType: body.content_type,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from('profiles')
+      .update({ profile_photo: objectPath })
+      .eq('id', student.profile_id);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    const { data: signedUrlData } = await supabaseAdmin.storage
+      .from(PROFILE_PHOTOS_BUCKET)
+      .createSignedUrl(objectPath, 60 * 60);
+
+    res.status(201).json({
+      profile_photo_path: objectPath,
+      profile_photo_url: signedUrlData?.signedUrl ?? null,
+    });
+  } catch (err) {
+    if (shouldUseLocalData(err)) {
+      const body = UploadStudentProfilePhotoSchema.parse(req.body);
+      const url = `data:${body.content_type};base64,${body.data_base64}`;
+      setDevStudentProfilePhoto(body.student_id, url);
+      res.status(201).json({ profile_photo_path: url, profile_photo_url: url });
+      return;
+    }
+
+    const msg = err instanceof Error ? err.message : 'Failed to upload profile photo';
+    res.status(400).json({ error: msg });
   }
 });
 

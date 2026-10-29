@@ -19,12 +19,14 @@ import badgeRoutes from './routes/badges.route';
 import notificationRoutes from './routes/notifications.route';
 import studentAppRoutes from './routes/student.route';
 import teacherAppRoutes from './routes/teacher-app.route';
+import deviceTokenRoutes from './routes/device-tokens.route';
 import { createAuthGuard } from './middleware/auth-guard';
+import { reminderScheduler } from './services/reminder-scheduler.service';
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(createAuthGuard(config.enforceDevAuth));
 
 app.use('/api/auth', authRoutes);
@@ -41,6 +43,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/remarks', remarkRoutes);
 app.use('/api/badges', badgeRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/device-tokens', deviceTokenRoutes);
 app.use('/api/student', studentAppRoutes);
 app.use('/api/teacher', teacherAppRoutes);
 
@@ -79,17 +82,40 @@ app.post('/notifications/test', async (req, res) => {
   res.json({ ok: true });
 });
 
-function bootstrap() {
-  try {
-    assertEnv();
-
-    app.listen(config.port, () => {
-      console.log(`API listening on http://localhost:${config.port}`);
-      console.log(`Health check: http://localhost:${config.port}/health`);
-    });
-  } catch (err) {
-    console.error('Failed to start API:', err);
+async function verifySupabaseConnectivity() {
+  const { error } = await supabaseAdmin.from('activity_categories').select('id').limit(1);
+  if (error) {
+    throw new Error(`Supabase connectivity check failed: ${error.message}`);
   }
 }
 
-bootstrap();
+async function bootstrap() {
+  assertEnv();
+
+  if (config.requireSupabaseOnBoot) {
+    await verifySupabaseConnectivity();
+  }
+
+  // Initialize reminder scheduler after Supabase is ready
+  try {
+    await reminderScheduler.initialize();
+  } catch (error) {
+    console.error('Failed to initialize reminder scheduler:', error);
+    // Continue anyway, reminders can be manually triggered
+  }
+
+  app.listen(config.port, () => {
+    console.log(`API listening on http://localhost:${config.port}`);
+    console.log(`Health check: http://localhost:${config.port}/health`);
+    console.log(`Local data fallback: ${config.allowLocalDataFallback ? 'enabled' : 'disabled'}`);
+    console.log(`Force live DB mode: ${config.forceLiveDb ? 'enabled' : 'disabled'}`);
+    console.log(`Require Supabase on boot: ${config.requireSupabaseOnBoot ? 'enabled' : 'disabled'}`);
+  });
+}
+
+bootstrap().catch((err) => {
+  console.error('Failed to start API:', err);
+  if (!config.allowLocalDataFallback) {
+    console.error('Hint: set ALLOW_LOCAL_DATA_FALLBACK=true for temporary local fallback in non-production environments.');
+  }
+});

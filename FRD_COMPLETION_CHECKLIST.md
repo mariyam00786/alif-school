@@ -79,33 +79,134 @@
 
 ## ⏳ PENDING FEATURES (Future Phases)
 
+### Priority-Ordered FRD Pending Items
+| Priority | Area | Pending Work |
+|----------|------|--------------|
+| P1 | Push Notifications (FCM) | Complete reminder scheduling worker, notification preference UI, and production Firebase credentials validation (client token registration + targeted send are implemented) |
+| P1 | Live Supabase Hardening | Run full live smoke tests with FORCE_LIVE_DB=true, validate RLS/storage policies in production-like data, and complete real OTP delivery testing |
+| P1 | Reports Parity | Complete batch comparison + teacher-focused reports, and wire all report variants into admin UI (monthly/student progress/export endpoints are implemented) |
+| P2 | Badge & Achievement Management | Build admin badge CRUD, auto-award rules, bonus point logic, student badge progress, and badge history |
+| P2 | Notification Management (Admin) | Add admin UI and APIs for all-student, batch-wise, scheduled, and reminder notifications |
+| P2 | Student App Parity Gaps | Add past-date marking limits, parent approval checkbox, note field, richer monthly charts/calendar views, language preference, privacy settings, and notification settings |
+| P2 | Parent Mode Completion | Add multi-child switching polish, teacher remarks visibility, submission approval flow, and notification support for parent users |
+| P2 | Teacher Mobile Completion | Add teacher remark workflow in-app if incomplete, batch or student messaging, achievement acknowledgement, and reminder sending |
+| P3 | Admin Management Parity | Add student bulk actions, export flows, teacher subjects/profile photo support, and any remaining advanced filters |
+| P3 | Offline, Performance, and Localization | Add 7-day offline cache, graceful offline UX, performance verification, and fuller Malayalam/English localization coverage |
+
+#### Live Supabase Hardening Progress (2026-06-17)
+- Implemented strict live mode defaults in API config: local fallback is now disabled unless explicitly enabled.
+- Added startup Supabase connectivity verification so API boot fails fast when live DB access is broken.
+- Added explicit environment switches for controlled local fallback during non-production debugging.
+- Executed strict live-mode smoke suite with fallback disabled.
+   - PASS: `/health` responded with `degraded` and explicit Supabase fetch failure when connectivity was unavailable.
+   - PASS: Core data routes (`/api/batches`, `/api/students`, `/api/teachers`, `/api/activity-logs`, `/api/student/leaderboard`, `/api/student/profile-photo`) failed closed with 400 + fetch error, confirming no silent local fallback.
+   - FINDING: Auth dev paths are still active in live mode (`/api/auth/send-otp`, `/api/auth/verify-otp`, `/api/auth/me` with `Bearer dev-*`) and must be disabled for production hardening.
+
+### Actionable Engineering Tasks By Priority
+
+#### P1. Push Notifications (FCM)
+1. Replace placeholder Firebase config with real project values
+   - Likely files: [apps/alif_student_teacher/lib/services/firebase_options.dart](apps/alif_student_teacher/lib/services/firebase_options.dart), [apps/alif_admin/lib/services/firebase_options.dart](apps/alif_admin/lib/services/firebase_options.dart), [infra/firebase/README.md](infra/firebase/README.md)
+2. Persist device tokens to backend and wire refresh handling
+   - Likely files: [apps/alif_student_teacher/lib/services/fcm_service.dart](apps/alif_student_teacher/lib/services/fcm_service.dart), [apps/alif_admin/lib/services/fcm_service.dart](apps/alif_admin/lib/services/fcm_service.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart), [apps/alif_admin/lib/services/notification_service.dart](apps/alif_admin/lib/services/notification_service.dart), [services/api/src/routes/notifications.route.ts](services/api/src/routes/notifications.route.ts), [services/api/src/schemas/notification.schema.ts](services/api/src/schemas/notification.schema.ts)
+3. Add notification permission UX and user settings screens
+   - Likely files: [apps/alif_student_teacher/lib/main.dart](apps/alif_student_teacher/lib/main.dart), [apps/alif_student_teacher/lib/screens/student_profile_page.dart](apps/alif_student_teacher/lib/screens/student_profile_page.dart), [apps/alif_student_teacher/lib/models/notification_manager.dart](apps/alif_student_teacher/lib/models/notification_manager.dart)
+4. Implement targeted and scheduled notification sending
+   - Likely files: [services/api/src/routes/notifications.route.ts](services/api/src/routes/notifications.route.ts), [services/api/src/integrations.ts](services/api/src/integrations.ts), [apps/alif_admin/lib/screens/notifications_page.dart](apps/alif_admin/lib/screens/notifications_page.dart), [apps/alif_admin/lib/services/notification_service.dart](apps/alif_admin/lib/services/notification_service.dart)
+
+#### P1. Live Supabase Hardening
+1. Audit and reduce fallback-only behavior on production paths
+   - Likely files: [services/api/src/dev-data.ts](services/api/src/dev-data.ts), [services/api/src/routes/student.route.ts](services/api/src/routes/student.route.ts), [services/api/src/routes/teacher-app.route.ts](services/api/src/routes/teacher-app.route.ts), [services/api/src/routes/students.route.ts](services/api/src/routes/students.route.ts), [services/api/src/routes/teachers.route.ts](services/api/src/routes/teachers.route.ts)
+2. Verify environment handling and cloud connection assumptions
+   - Likely files: [services/api/src/config.ts](services/api/src/config.ts), [services/api/src/integrations.ts](services/api/src/integrations.ts), [supabase/config.toml](supabase/config.toml), [RUNNING.md](RUNNING.md)
+3. Validate auth, role resolution, storage access, and OTP in live mode
+   - Likely files: [services/api/src/routes/auth.route.ts](services/api/src/routes/auth.route.ts), [apps/alif_student_teacher/lib/services/auth_service.dart](apps/alif_student_teacher/lib/services/auth_service.dart), [apps/alif_student_teacher/lib/config/app_config.dart](apps/alif_student_teacher/lib/config/app_config.dart), [apps/alif_student_teacher/env/dev.json](apps/alif_student_teacher/env/dev.json)
+4. Review RLS and storage policies against app flows
+   - Likely files: [supabase/migrations/20260617161000_init_alif_schema.sql](supabase/migrations/20260617161000_init_alif_schema.sql), [supabase/seed.sql](supabase/seed.sql)
+
+#### P1. Reports Parity
+1. Extend API for monthly, student, batch-comparison, and teacher reports
+   - Likely files: [services/api/src/routes/reports.route.ts](services/api/src/routes/reports.route.ts), [services/api/src/schemas/report.schema.ts](services/api/src/schemas/report.schema.ts)
+2. Add admin UI tabs, filters, and result views for new reports
+   - Likely files: [apps/alif_admin/lib/screens/reports_page.dart](apps/alif_admin/lib/screens/reports_page.dart), [apps/alif_admin/lib/services/report_service.dart](apps/alif_admin/lib/services/report_service.dart), [apps/alif_admin/lib/models/report.dart](apps/alif_admin/lib/models/report.dart)
+3. Implement export support for PDF, Excel, and print-friendly views
+   - Likely files: [services/api/package.json](services/api/package.json), [services/api/src/routes/reports.route.ts](services/api/src/routes/reports.route.ts), [apps/alif_admin/lib/screens/reports_page.dart](apps/alif_admin/lib/screens/reports_page.dart)
+
+#### P2. Badge & Achievement Management
+1. Finish admin badge CRUD and rule editing
+   - Likely files: [apps/alif_admin/lib/screens/badges_page.dart](apps/alif_admin/lib/screens/badges_page.dart), [apps/alif_admin/lib/services/badge_service.dart](apps/alif_admin/lib/services/badge_service.dart), [apps/alif_admin/lib/models/badge.dart](apps/alif_admin/lib/models/badge.dart), [services/api/src/routes/badges.route.ts](services/api/src/routes/badges.route.ts), [services/api/src/schemas/badge.schema.ts](services/api/src/schemas/badge.schema.ts)
+2. Implement auto-award logic and bonus point effects
+   - Likely files: [services/api/src/routes/badges.route.ts](services/api/src/routes/badges.route.ts), [services/api/src/routes/activity-logs.route.ts](services/api/src/routes/activity-logs.route.ts), [supabase/migrations/20260617161000_init_alif_schema.sql](supabase/migrations/20260617161000_init_alif_schema.sql)
+3. Show badge progress and history in student app
+   - Likely files: [apps/alif_student_teacher/lib/screens/student_badges_page.dart](apps/alif_student_teacher/lib/screens/student_badges_page.dart), [apps/alif_student_teacher/lib/models/badge_teacher.dart](apps/alif_student_teacher/lib/models/badge_teacher.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart)
+
+#### P2. Notification Management (Admin)
+1. Complete admin compose, schedule, and audience targeting flow
+   - Likely files: [apps/alif_admin/lib/screens/notifications_page.dart](apps/alif_admin/lib/screens/notifications_page.dart), [apps/alif_admin/lib/services/notification_service.dart](apps/alif_admin/lib/services/notification_service.dart), [apps/alif_admin/lib/models/notification_item.dart](apps/alif_admin/lib/models/notification_item.dart)
+2. Support all-student, batch, class, and individual targeting in backend
+   - Likely files: [services/api/src/routes/notifications.route.ts](services/api/src/routes/notifications.route.ts), [services/api/src/schemas/notification.schema.ts](services/api/src/schemas/notification.schema.ts)
+
+#### P2. Student App Parity Gaps
+1. Add parent approval, note field, and past-date limits to daily marking
+   - Likely files: [apps/alif_student_teacher/lib/main.dart](apps/alif_student_teacher/lib/main.dart), [apps/alif_student_teacher/lib/models/activity.dart](apps/alif_student_teacher/lib/models/activity.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart), [services/api/src/routes/activity-logs.route.ts](services/api/src/routes/activity-logs.route.ts), [services/api/src/schemas/activity-log.schema.ts](services/api/src/schemas/activity-log.schema.ts)
+2. Expand progress UX with monthly calendar and richer charting
+   - Likely files: [apps/alif_student_teacher/lib/main.dart](apps/alif_student_teacher/lib/main.dart), [apps/alif_student_teacher/lib/models/leaderboard.dart](apps/alif_student_teacher/lib/models/leaderboard.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart)
+3. Add language, privacy, and notification settings
+   - Likely files: [apps/alif_student_teacher/lib/screens/student_profile_page.dart](apps/alif_student_teacher/lib/screens/student_profile_page.dart), [apps/alif_student_teacher/lib/models/student.dart](apps/alif_student_teacher/lib/models/student.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart)
+
+#### P2. Parent Mode Completion
+1. Improve linked-child switching and parent-oriented navigation
+   - Likely files: [apps/alif_student_teacher/lib/screens/parent_insights_page.dart](apps/alif_student_teacher/lib/screens/parent_insights_page.dart), [apps/alif_student_teacher/lib/models/student.dart](apps/alif_student_teacher/lib/models/student.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart)
+2. Expose teacher remarks and parent approval workflow in-app
+   - Likely files: [apps/alif_student_teacher/lib/screens/parent_insights_page.dart](apps/alif_student_teacher/lib/screens/parent_insights_page.dart), [services/api/src/routes/student.route.ts](services/api/src/routes/student.route.ts), [services/api/src/routes/remarks.route.ts](services/api/src/routes/remarks.route.ts)
+
+#### P2. Teacher Mobile Completion
+1. Add remark creation and messaging actions to teacher app flow
+   - Likely files: [apps/alif_student_teacher/lib/screens/teacher_dashboard_page.dart](apps/alif_student_teacher/lib/screens/teacher_dashboard_page.dart), [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart), [services/api/src/routes/teacher-app.route.ts](services/api/src/routes/teacher-app.route.ts)
+2. Add achievement acknowledgement and batch reminder actions
+   - Likely files: [apps/alif_student_teacher/lib/screens/teacher_dashboard_page.dart](apps/alif_student_teacher/lib/screens/teacher_dashboard_page.dart), [services/api/src/routes/notifications.route.ts](services/api/src/routes/notifications.route.ts)
+
+#### P3. Admin Management Parity
+1. Add student bulk actions and export tools
+   - Likely files: [apps/alif_admin/lib/screens/student_management_page.dart](apps/alif_admin/lib/screens/student_management_page.dart), [apps/alif_admin/lib/screens/student_list_view.dart](apps/alif_admin/lib/screens/student_list_view.dart), [apps/alif_admin/lib/services/student_service.dart](apps/alif_admin/lib/services/student_service.dart), [services/api/src/routes/students.route.ts](services/api/src/routes/students.route.ts)
+2. Add teacher subjects and profile photo support
+   - Likely files: [apps/alif_admin/lib/screens/teacher_management_page.dart](apps/alif_admin/lib/screens/teacher_management_page.dart), [apps/alif_admin/lib/services/teacher_service.dart](apps/alif_admin/lib/services/teacher_service.dart), [apps/alif_admin/lib/models/teacher.dart](apps/alif_admin/lib/models/teacher.dart), [services/api/src/routes/teachers.route.ts](services/api/src/routes/teachers.route.ts), [services/api/src/schemas/teacher.schema.ts](services/api/src/schemas/teacher.schema.ts)
+
+#### P3. Offline, Performance, and Localization
+1. Add last-7-days cache and offline recovery behavior
+   - Likely files: [apps/alif_student_teacher/lib/services/api_service.dart](apps/alif_student_teacher/lib/services/api_service.dart), [apps/alif_student_teacher/lib/services/auth_service.dart](apps/alif_student_teacher/lib/services/auth_service.dart), [apps/alif_student_teacher/lib/main.dart](apps/alif_student_teacher/lib/main.dart)
+2. Improve bilingual text coverage and settings persistence
+   - Likely files: [apps/alif_student_teacher/lib/screens/student_profile_page.dart](apps/alif_student_teacher/lib/screens/student_profile_page.dart), [apps/alif_admin/lib/main.dart](apps/alif_admin/lib/main.dart), [packages/alif_design_system/lib](packages/alif_design_system/lib)
+3. Document launch and infrastructure validation steps
+   - Likely files: [RUNNING.md](RUNNING.md), [README.md](README.md), [CLIENT_SETUP.md](CLIENT_SETUP.md)
+
 ### Phase 2: Core Admin Features (Not in EXP scope)
 | Requirement | Status | Reason |
 |-----------|--------|--------|
-| Student Management | 🔲 | Deferred |
-| Teacher Management | 🔲 | Deferred |
-| Batch Management | 🔲 | Deferred |
-| Activity Category Config | 🔲 | Deferred |
-| Rating/Scoring Config | 🔲 | Deferred |
+| Student Management | ✅ | Implemented in EXP-5 stabilization |
+| Teacher Management | ✅ | Implemented in EXP-5 stabilization |
+| Batch Management | ✅ | Implemented in EXP-5 stabilization |
+| Activity Category Config | ✅ | Implemented (activities API + admin flow) |
+| Rating/Scoring Config | ✅ | Implemented (ratings API + admin flow) |
 | Badge & Achievement Mgmt | 🔲 | Deferred |
 | Notification System | 🔲 | Deferred |
 
 ### Phase 3: Student/Teacher Mobile App
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Student Self-Reporting | 🔲 | Mobile app structure exists |
-| Teacher Dashboard | 🔲 | Mobile app structure exists |
-| Parent Portal | 🔲 | Not yet started |
-| Leaderboard | 🔲 | Depends on student data |
-| Progress Charts | 🔲 | Depends on data volume |
+| Student Self-Reporting | ✅ | Daily activity marking UI + API integration implemented |
+| Teacher Dashboard | ✅ | Batch analytics + student monitoring UI implemented |
+| Parent Portal | ✅ | Parent insights + child progress tracking implemented |
+| Leaderboard | ✅ | Daily/weekly/monthly/all-time leaderboard implemented |
+| Progress Charts | ✅ | Weekly/monthly progress tracking implemented |
 
 ### Phase 4: Supabase Integration
 | Component | Status | Current State |
 |-----------|--------|----------------|
-| Auth (Supabase) | 🔲 | Using dev OTP fallback |
-| Database (Supabase) | 🔲 | Using `dev-data.ts` local fallback |
-| Storage (Supabase) | 🔲 | Not implemented |
-| Push Notifications (FCM) | 🔲 | Not implemented |
+| Auth (Supabase) | ✅ | Direct mobile app auth via `supabase_flutter` + persisted session UX implemented |
+| Database (Supabase) | ✅ | Live Supabase routes available with `dev-data.ts` fallback for local resilience |
+| Storage (Supabase) | ✅ | Student profile photo upload flow implemented with signed URL retrieval |
+| Push Notifications (FCM) | ⏳ | Server test endpoint + Firebase messaging bootstrap exist; client setup pending |
 
 ---
 

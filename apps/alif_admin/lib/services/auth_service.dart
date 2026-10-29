@@ -43,8 +43,15 @@ class AuthSession {
 
 class AuthService {
   static const String _devOtp = '123456';
+  static String? _accessToken;
 
   static String get devOtp => _devOtp;
+
+  static String? getToken() => _accessToken;
+
+  static void clearToken() {
+    _accessToken = null;
+  }
 
   static Future<void> sendOtp({required String phone}) async {
     final response = await http.post(
@@ -73,6 +80,8 @@ class AuthService {
     }
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    return AuthSession.fromJson(decoded);
+    final session = AuthSession.fromJson(decoded);
+    _accessToken = session.accessToken;
+    return session;
   }
 }

@@ -23,6 +23,14 @@ function createAuthGuard(enforce) {
             return;
         }
         const role = roleFromHeader(req);
+        const hasBearerAuth = String(req.header('authorization') ?? '')
+            .trim()
+            .toLowerCase()
+            .startsWith('bearer ');
+        if (req.path.startsWith('/api/device-tokens') && (role || hasBearerAuth)) {
+            next();
+            return;
+        }
         if (!role) {
             res.status(401).json({
                 error: 'Missing x-alif-role header. Supported roles: admin, teacher, student, parent.',

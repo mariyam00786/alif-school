@@ -63,6 +63,9 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
   Future<void> _loadBatches() async {
     try {
       final batches = await StudentService.getBatches();
+      if (!mounted) {
+        return;
+      }
       setState(() => _batches = batches);
 
       if (_batchId != null) {
@@ -80,6 +83,9 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
   Future<void> _loadClasses(String batchId) async {
     try {
       final classes = await StudentService.getClasses(batchId);
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _classes = classes;
         if (_classId == null && classes.isNotEmpty) {
@@ -98,6 +104,10 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
     );
+
+    if (!mounted) {
+      return;
+    }
 
     if (date != null) {
       setState(() => _dob = date);
@@ -146,7 +156,9 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
           );
         }
       } finally {
-        setState(() => _isLoading = false);
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
       }
     }
   }

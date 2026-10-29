@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UpdateStudentProfileSchema = exports.StudentApprovalHistoryQuerySchema = exports.StudentChildrenQuerySchema = exports.StudentProfileQuerySchema = exports.StudentBadgesQuerySchema = exports.StudentProgressQuerySchema = exports.StudentLeaderboardQuerySchema = void 0;
+exports.UploadStudentProfilePhotoSchema = exports.UpdateStudentProfileSchema = exports.StudentApprovalHistoryQuerySchema = exports.StudentChildrenQuerySchema = exports.StudentProfileQuerySchema = exports.StudentBadgesQuerySchema = exports.StudentProgressQuerySchema = exports.StudentLeaderboardQuerySchema = void 0;
 const zod_1 = require("zod");
 const IsoDateSchema = zod_1.z
     .string()
@@ -32,4 +32,10 @@ exports.StudentApprovalHistoryQuerySchema = zod_1.z.object({
 });
 exports.UpdateStudentProfileSchema = zod_1.z.object({
     address: zod_1.z.string().min(2).optional(),
+});
+exports.UploadStudentProfilePhotoSchema = zod_1.z.object({
+    student_id: zod_1.z.string().uuid(),
+    file_name: zod_1.z.string().min(1).max(200),
+    content_type: zod_1.z.enum(['image/jpeg', 'image/png', 'image/webp']),
+    data_base64: zod_1.z.string().min(20),
 });

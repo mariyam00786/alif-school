@@ -4,6 +4,7 @@ const express_1 = require("express");
 const dev_data_1 = require("../dev-data");
 const integrations_1 = require("../integrations");
 const notification_schema_1 = require("../schemas/notification.schema");
+const push_delivery_service_1 = require("../services/push-delivery.service");
 const router = (0, express_1.Router)();
 const NOTIFICATION_SELECT = 'id, title, body, target_type, target_id, scheduled_at, sent_at, created_at';
 router.get('/', async (req, res) => {
@@ -59,7 +60,22 @@ router.post('/', async (req, res) => {
             res.status(400).json({ error: error.message });
             return;
         }
-        res.status(201).json(data);
+        let pushDelivery = null;
+        if (!body.scheduled_at) {
+            pushDelivery = await (0, push_delivery_service_1.sendNotificationPush)({
+                notificationId: data.id,
+                title: data.title,
+                body: data.body,
+                targetType: data.target_type,
+                targetId: data.target_id,
+            });
+        }
+        res.status(201).json(pushDelivery
+            ? {
+                ...data,
+                push_delivery: pushDelivery,
+            }
+            : data);
     }
     catch (err) {
         if ((0, dev_data_1.shouldUseLocalData)(err)) {
